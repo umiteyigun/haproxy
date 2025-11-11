@@ -1,0 +1,53 @@
+name: WAF CI
+
+on:
+  push:
+    paths:
+      - 'Makefile'
+      - 'docker-compose.yml'
+      - 'haproxy/**'
+      - 'modsecurity/**'
+      - 'spoa/**'
+      - 'scripts/waf_smoke_test.sh'
+      - '.github/workflows/waf-ci.yml'
+  pull_request:
+    paths:
+      - 'Makefile'
+      - 'docker-compose.yml'
+      - 'haproxy/**'
+      - 'modsecurity/**'
+      - 'spoa/**'
+      - 'scripts/waf_smoke_test.sh'
+
+jobs:
+  build-test:
+    runs-on: ubuntu-22.04
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build WAF components
+        run: docker compose build spoa haproxy
+
+      - name: Launch WAF stack
+        run: docker compose up -d spoa haproxy
+
+      - name: Validate HAProxy configuration
+        run: docker compose run --rm haproxy haproxy -c -f /usr/local/etc/haproxy/haproxy.cfg
+
+      - name: Run WAF smoke test
+        run: bash scripts/waf_smoke_test.sh
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          docker logs haproxy
+          docker logs haproxy-spoa
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose down

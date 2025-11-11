@@ -28,6 +28,14 @@ Bu doküman, projede planlanan WAF (Web Application Firewall) çalışmalarını
 - `docker-compose.yml` – Ayrı `modsecurity` servisi kaldırıldı; `spoa` servisi depo kökünden build alacak şekilde güncellendi ve log dizini mount edildi.
 - `haproxy/modsecurity.conf` – `[modsecurity]` bölümü, timeout değerleri ve `on-frontend-http-request` event tanımı ile güncellendi.
 - `haproxy/haproxy.cfg` – HTTP/HTTPS frontend’lerine SPOE filtreleri ve WAF ACL kuralları eklendi; dinamik placeholder’lar (ACL/redirect/backend) geri yüklendi.
+- `scripts/waf_smoke_test.sh` – İyi ve kötü User-Agent senaryolarını kullanarak WAF’ın temel davranışını otomatik test eden betik.
+
+### Test Notları
+- Benign istek (301 yönlendirme beklenir):
+  - `curl -s -o /dev/null -w "%{http_code}\n" -H "Host: ssl.trtek.tr" -H "User-Agent: Mozilla/5.0" http://localhost/`
+- Kötü amaçlı tarayıcı taklidi (403 beklenir):
+  - `curl -s -o /dev/null -w "%{http_code}\n" -H "Host: ssl.trtek.tr" -H "User-Agent: sqlmap" http://localhost/`
+- HAProxy loglarında 403 satırları `PR--` olarak görülebilir (bkz. `docker logs haproxy --tail 5`).
 
 ### Yapılacaklar
 - OWASP CRS üzerinde kurum ihtiyaçlarına göre tuning (false-positive analizi, ek kural dosyaları).
@@ -39,15 +47,16 @@ Bu doküman, projede planlanan WAF (Web Application Firewall) çalışmalarını
 
 ---
 
-## Faz 3 – CI/CD, Monitoring ve Dokümantasyon (Planlanıyor)
+## Faz 3 – CI/CD, Monitoring ve Dokümantasyon (Başlatıldı)
 **Hedef:** WAF konfigürasyonlarını otomasyona almak, izleme/uyarı mekanizmalarını devreye sokmak.
 
-- CI/CD pipeline’ında WAF konfigürasyon testleri (`haproxy -c`, ModSecurity config lint vb.) otomatik çalıştırılacak.
-- WAF logları (HAProxy ve ModSecurity) merkezi log/monitoring stack’ine (Örn. ELK, Grafana) aktarılacak.
-- Performans ve latency ölçümleri kayıt altına alınacak.
+- `Makefile` → `make test-waf` hedefi SPOA/HAProxy imajlarını build edip, stack’i ayağa kaldırarak duman testi çalıştırır.
+- `.github/workflows/waf-ci.yml` → Her push/PR’da WAF bileşenlerini build eder, HAProxy syntax kontrolü yapar ve smoke test betiğini çalıştırır.
+- WAF logları (HAProxy ve ModSecurity) için `make waf-logs` ile hızlı erişim sağlandı.
+- Performans ve latency ölçümleri ile merkezi log/monitoring entegrasyonu sonraki iterasyonlarda tamamlanacak.
 - Bu README ve `docs/WAF_PLAN.md` düzenli olarak güncellenecek.
 
-> Faz 3 çalışmalarına başlanınca adımlar bu bölümde detaylandırılacak.
+> Faz 3 kapsamında kalan işler: merkezi log shipping, uyarı mekanizmaları, üretim ortamı için performans ölçümleri.
 
 ---
 

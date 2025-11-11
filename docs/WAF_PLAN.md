@@ -40,31 +40,31 @@
    - ModSecurity `SecRuleEngine DetectionOnly` olarak çalışıyor; custom kurallar `modsecurity/rules` altına eklenebiliyor.
 5. **Log & Alerting** 🔄
    - Şimdilik `/var/log/modsecurity` bind mount ile host’a aktarılıyor.
+   - `scripts/waf_smoke_test.sh` CLI üzerinden iyi/kötü User-Agent senaryolarını doğruluyor; `make test-waf` hedefi ile entegre edildi.
    - ELK/Grafana entegrasyonu Faz 3 kapsamında tamamlanacak.
 
 ### Çıktılar
-- Yeni Docker servisi (`modsecurity`, `spoa`).
+- Yeni Docker servisi (`spoa`).
 - HAProxy config’inde SPOE filter.
-- OWASP CRS kural seti yapılandırması.
+- OWASP CRS kural seti yapılandırması ve otomatik WAF smoke testi.
 
 ---
 
 ## Faz 3 – Yönetim & Otomasyon
-1. **CI/CD Entegrasyonu**
-   - ModSecurity kural güncellemeleri için pipeline oluştur.
-   - `make test-waf` hedefi ile HAProxy & ModSecurity config lint.
-2. **Konfigürasyon Yönetimi**
-   - WAF kuralları repo içinde version control.
-   - Ortam bazlı (dev/stage/prod) override dosyaları.
-3. **Monitoring**
-   - Prometheus/Grafana ile WAF metrikleri (engellenen istek sayısı vs.).
-   - Alertmanager ile kritik eşikler için bildirim.
-4. **Failover Politikası**
-   - ModSecurity/SPOE servisi down olursa: `t_idle` ve `on-error` davranışını belirle (pass-through vs block).
+1. **CI/CD Entegrasyonu** ✅
+   - `.github/workflows/waf-ci.yml` HAProxy/SPOA build eder, konfigürasyon testi ve smoke testi çalıştırır.
+   - `Makefile` içerisindeki `test-waf` hedefi yerelde aynı senaryoyu tekrarlar.
+2. **Konfigürasyon Yönetimi** 🔄
+   - WAF kuralları repo içinde version control (tamamlandı); ortam bazlı override dosyaları ve yayın süreci tanımlanacak.
+3. **Monitoring** 🔄
+   - Prometheus/Grafana ile WAF metrikleri (engellenen istek sayısı vs.) toplanacak.
+   - Alertmanager ile kritik eşikler için bildirim tasarlanacak.
+4. **Failover Politikası** 🔄
+   - ModSecurity/SPOE servisi down olursa: `t_idle` ve `on-error` davranışı belirlenecek (passthrough vs block).
 
 ### Çıktılar
-- Pipeline scriptleri, Makefile hedefleri.
-- Monitoring/alerting dashboardları.
+- Çalışan CI pipeline, Makefile hedefleri.
+- (Planlanan) Monitoring/alerting dashboardları.
 
 ---
 
