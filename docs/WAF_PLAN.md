@@ -91,3 +91,4 @@ Sorumluluklar ortam ve ekip rollerine göre netleştirilecek.
 - WAF’ı sadece HTTP(S) trafiğinde devreye al; TCP port yönlendirmeleri için ayrı politika gerekiyor.
 - HAProxy reload öncesi config test (`haproxy -c -f ...`).
 - Performans testleri: WAF açıldıktan sonra latency ölçümü (k6, wrk vb.).
+- Loki/Promtail/Grafana monitoring stack (`monitoring/docker-compose.monitoring.yml`, `make monitoring-up`) log takibini destekliyor.

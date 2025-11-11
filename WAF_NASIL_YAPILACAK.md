@@ -56,6 +56,7 @@ Bu doküman, projede planlanan WAF (Web Application Firewall) çalışmalarını
 - `Makefile` → `make test-waf` hedefi SPOA/HAProxy imajlarını build edip, stack’i ayağa kaldırarak duman testi çalıştırır.
 - `.github/workflows/waf-ci.yml` → Her push/PR’da WAF bileşenlerini build eder, HAProxy syntax kontrolü yapar ve smoke test betiğini çalıştırır.
 - WAF logları (HAProxy ve ModSecurity) için `make waf-logs` ile hızlı erişim sağlandı. `MODSEC_AUDIT_ENGINE=On` ile daha detaylı ModSecurity audit log’ları alınabilir ve `make waf-report` ile özetlenebilir.
+- `monitoring/docker-compose.monitoring.yml` ile Loki+Promtail+Grafana stack’i hazır: `make monitoring-up` komutu log izleme ortamını ayağa kaldırır (varsayılan kullanıcı/şifre `admin/admin`).
 - Ayrıntılı tuning raporları `docs/WAF_TUNING_REPORT.md` dosyasında tutuluyor.
 - Performans ve latency ölçümleri ile merkezi log/monitoring entegrasyonu sonraki iterasyonlarda tamamlanacak.
 - Bu README ve `docs/WAF_PLAN.md` düzenli olarak güncellenecek.

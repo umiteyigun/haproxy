@@ -164,6 +164,18 @@ curl -X POST http://localhost:3000/api/ssl/request \
 - Database servisinin çalıştığını kontrol edin
 - API loglarını kontrol edin: `docker-compose logs api`
 
+## Monitoring
+
+An optional Loki + Promtail + Grafana stack is available under `monitoring/`.
+
+```bash
+make monitoring-up      # start monitoring containers (Loki, Promtail, Grafana)
+make monitoring-logs    # tail monitoring container logs
+make monitoring-down    # stop and remove monitoring stack
+```
+
+Grafana listens on <http://localhost:3001/> with default credentials `admin/admin` (overridable via `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD`).
+
 ## Lisans
 
 MIT
