@@ -416,7 +416,7 @@ async function generateDynamicHAProxyConfig(rules) {
     }
     
     await hydrateRuleBackends(rules);
-
+    
     // Collect SSL certificates for HTTPS frontend bind
     const sslCertificates = new Set();
     rules.forEach(rule => {
@@ -452,16 +452,16 @@ async function generateDynamicHAProxyConfig(rules) {
         return;
       }
 
-      const domainLower = rule.domain.toLowerCase();
-      frontendACLs += `    acl host_${rule.id} hdr(host) -i ${domainLower}\n`;
-      if (rule.path && rule.path !== '/') {
-        // Path specified and not root - use path matching
-        frontendACLs += `    acl path_${rule.id} path_beg ${rule.path}\n`;
-        frontendRules += `    use_backend backend_${rule.id} if host_${rule.id} path_${rule.id}\n`;
-      } else {
-        // No path or root path - match all paths for this domain
-        frontendRules += `    use_backend backend_${rule.id} if host_${rule.id}\n`;
-      }
+        const domainLower = rule.domain.toLowerCase();
+        frontendACLs += `    acl host_${rule.id} hdr(host) -i ${domainLower}\n`;
+        if (rule.path && rule.path !== '/') {
+          // Path specified and not root - use path matching
+          frontendACLs += `    acl path_${rule.id} path_beg ${rule.path}\n`;
+          frontendRules += `    use_backend backend_${rule.id} if host_${rule.id} path_${rule.id}\n`;
+        } else {
+          // No path or root path - match all paths for this domain
+          frontendRules += `    use_backend backend_${rule.id} if host_${rule.id}\n`;
+        }
 
       if (rule.redirect_to_https && rule.ssl_enabled && !processedRedirects.has(rule.id)) {
         processedRedirects.add(rule.id);
@@ -740,7 +740,8 @@ async function hydrateRuleBackends(rules) {
 
 // API Routes
 
-// Auth helpers
+const ALLOWED_MEMBER_ROLES = ['admin', 'operator'];
+
 function requireAuth(req, res, next) {
   const auth = req.headers.authorization || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
@@ -752,6 +753,31 @@ function requireAuth(req, res, next) {
   } catch (e) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
+}
+
+function requireAdmin(req, res, next) {
+  if (!req.user || req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  return next();
+}
+
+function isValidEmailAddress(email) {
+  return typeof email === 'string' && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim());
+}
+
+function isValidPassword(password) {
+  return typeof password === 'string' && password.length >= 8;
+}
+
+function sanitizeMember(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    email: row.email,
+    role: row.role,
+    created_at: row.created_at
+  };
 }
 
 // Auth routes
@@ -1551,6 +1577,84 @@ app.post('/api/ssl/renew', requireAuth, async (req, res) => {
   try {
     const result = await sslManager.renewCertificates();
     res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Member management
+app.get('/api/members', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT id, email, role, created_at FROM members ORDER BY created_at DESC');
+    res.json(result.rows.map(sanitizeMember));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/members', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { email, password, role } = req.body;
+    if (!isValidEmailAddress(email)) {
+      return res.status(400).json({ error: 'Geçerli bir e-posta adresi girin' });
+    }
+    if (!isValidPassword(password)) {
+      return res.status(400).json({ error: 'Şifre en az 8 karakter olmalıdır' });
+    }
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedRole = role && ALLOWED_MEMBER_ROLES.includes(role.toLowerCase()) ? role.toLowerCase() : 'operator';
+    const passwordHash = await bcrypt.hash(password, 10);
+    const insert = await pool.query(
+      'INSERT INTO members (email, password_hash, role) VALUES ($1, $2, $3) RETURNING id, email, role, created_at',
+      [normalizedEmail, passwordHash, normalizedRole]
+    );
+    res.status(201).json(sanitizeMember(insert.rows[0]));
+  } catch (error) {
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'Bu e-posta adresi zaten kayıtlı' });
+    }
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/members/:id/password', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const memberId = parseInt(req.params.id, 10);
+    const { password } = req.body;
+    if (!Number.isInteger(memberId) || memberId <= 0) {
+      return res.status(400).json({ error: 'Geçersiz kullanıcı' });
+    }
+    if (!isValidPassword(password)) {
+      return res.status(400).json({ error: 'Şifre en az 8 karakter olmalıdır' });
+    }
+    const passwordHash = await bcrypt.hash(password, 10);
+    const updated = await pool.query(
+      'UPDATE members SET password_hash = $1 WHERE id = $2 RETURNING id, email, role, created_at',
+      [passwordHash, memberId]
+    );
+    if (updated.rowCount === 0) {
+      return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+    }
+    res.json(sanitizeMember(updated.rows[0]));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/members/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const memberId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(memberId) || memberId <= 0) {
+      return res.status(400).json({ error: 'Geçersiz kullanıcı' });
+    }
+    if (req.user && req.user.id === memberId) {
+      return res.status(400).json({ error: 'Kendi hesabınızı silemezsiniz' });
+    }
+    const deleted = await pool.query('DELETE FROM members WHERE id = $1 RETURNING id', [memberId]);
+    if (deleted.rowCount === 0) {
+      return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+    }
+    res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

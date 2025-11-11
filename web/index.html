@@ -117,6 +117,11 @@
                             <i class="bi bi-shield-lock"></i> SSL Sertifikaları
                         </a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="showSection('users')">
+                            <i class="bi bi-people"></i> Kullanıcılar
+                        </a>
+                    </li>
                 </ul>
             </div>
 
@@ -216,6 +221,38 @@
                                     <tbody id="ssl-table-body">
                                         <tr>
                                             <td colspan="6" class="text-center">Henüz sertifika yok</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Users Section -->
+                <div id="users-section" class="section" style="display: none;">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-people"></i> Kullanıcılar</span>
+                            <button class="btn btn-primary btn-sm" onclick="showAddMemberModal()">
+                                <i class="bi bi-plus-circle"></i> Yeni Kullanıcı
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-hover">
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>E-posta</th>
+                                            <th>Rol</th>
+                                            <th>Oluşturulma</th>
+                                            <th>İşlemler</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="members-table-body">
+                                        <tr>
+                                            <td colspan="5" class="text-center">Yükleniyor...</td>
                                         </tr>
                                     </tbody>
                                 </table>
@@ -696,6 +733,78 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Kapat</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Member Modal -->
+    <div class="modal fade" id="addMemberModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Yeni Kullanıcı</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="addMemberForm">
+                        <div class="mb-3">
+                            <label class="form-label">E-posta</label>
+                            <input type="email" class="form-control" name="email" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Şifre</label>
+                            <input type="password" class="form-control" name="password" minlength="8" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Şifre (Tekrar)</label>
+                            <input type="password" class="form-control" name="password_confirm" minlength="8" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Rol</label>
+                            <select class="form-select" name="role">
+                                <option value="operator" selected>Operator</option>
+                                <option value="admin">Yönetici</option>
+                            </select>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
+                    <button type="button" class="btn btn-primary" onclick="saveMember()">Kaydet</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Change Password Modal -->
+    <div class="modal fade" id="changePasswordModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Şifre Güncelle</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="changePasswordForm">
+                        <input type="hidden" name="member_id" value="">
+                        <div class="mb-3">
+                            <label class="form-label">Kullanıcı</label>
+                            <div id="changePasswordEmail" class="fw-bold"></div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Yeni Şifre</label>
+                            <input type="password" class="form-control" name="password" minlength="8" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Yeni Şifre (Tekrar)</label>
+                            <input type="password" class="form-control" name="password_confirm" minlength="8" required>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
+                    <button type="button" class="btn btn-primary" onclick="updateMemberPassword()">Şifreyi Güncelle</button>
                 </div>
             </div>
         </div>

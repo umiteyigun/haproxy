@@ -74,6 +74,8 @@ function showSection(section) {
         loadPortForwardRules();
     } else if (section === 'ssl') {
         loadSSLCertificates();
+    } else if (section === 'users') {
+        loadMembers();
     }
 }
 
@@ -2567,6 +2569,168 @@ async function copyTextToClipboard(text, button) {
         }, 2000);
     } catch (error) {
         showAlert('Kopyalama başarısız: ' + error.message, 'warning');
+    }
+}
+
+async function loadMembers() {
+    const tbody = document.getElementById('members-table-body');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center">Yükleniyor...</td></tr>';
+    try {
+        const response = await fetch(`${API_BASE}/members`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (response.status === 403) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger">Bu işlem için yetkiniz yok</td></tr>';
+            return;
+        }
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.error || `Sunucu hatası (${response.status})`);
+        }
+        const members = await response.json();
+        if (!Array.isArray(members) || members.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center">Henüz kullanıcı yok</td></tr>';
+            return;
+        }
+        tbody.innerHTML = members.map(member => `
+            <tr>
+                <td>${member.id}</td>
+                <td>${member.email}</td>
+                <td>${(member.role || '').toUpperCase()}</td>
+                <td>${formatDateTime(member.created_at, true)}</td>
+                <td>
+                    <button class="btn btn-sm btn-warning me-2" onclick="showChangePasswordModal(${member.id}, '${member.email}')">
+                        <i class="bi bi-key"></i>
+                    </button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteMember(${member.id}, '${member.email}')">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (error) {
+        console.error('Error loading members:', error);
+        tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">Hata: ${error.message}</td></tr>`;
+    }
+}
+
+function showAddMemberModal() {
+    const form = document.getElementById('addMemberForm');
+    if (form) {
+        form.reset();
+    }
+    new bootstrap.Modal(document.getElementById('addMemberModal')).show();
+}
+
+async function saveMember() {
+    const form = document.getElementById('addMemberForm');
+    const formData = new FormData(form);
+    const email = formData.get('email')?.trim();
+    const password = formData.get('password');
+    const confirmPassword = formData.get('password_confirm');
+    const role = formData.get('role');
+
+    if (!email) {
+        showAlert('E-posta adresi gerekli', 'warning');
+        return;
+    }
+    if (!password || password.length < 8) {
+        showAlert('Şifre en az 8 karakter olmalıdır', 'warning');
+        return;
+    }
+    if (password !== confirmPassword) {
+        showAlert('Şifre ve şifre tekrarı eşleşmiyor', 'warning');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/members`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({ email, password, role })
+        });
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data.error || 'Kullanıcı oluşturulamadı');
+        }
+
+        showAlert('Kullanıcı başarıyla eklendi', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('addMemberModal'))?.hide();
+        loadMembers();
+    } catch (error) {
+        console.error('Error creating member:', error);
+        showAlert(error.message, 'danger');
+    }
+}
+
+function showChangePasswordModal(memberId, email) {
+    const form = document.getElementById('changePasswordForm');
+    if (!form) return;
+    form.reset();
+    form.querySelector('[name="member_id"]').value = memberId;
+    document.getElementById('changePasswordEmail').textContent = email;
+    new bootstrap.Modal(document.getElementById('changePasswordModal')).show();
+}
+
+async function updateMemberPassword() {
+    const form = document.getElementById('changePasswordForm');
+    const memberId = form.querySelector('[name="member_id"]').value;
+    const password = form.querySelector('[name="password"]').value;
+    const confirmPassword = form.querySelector('[name="password_confirm"]').value;
+
+    if (!password || password.length < 8) {
+        showAlert('Şifre en az 8 karakter olmalıdır', 'warning');
+        return;
+    }
+    if (password !== confirmPassword) {
+        showAlert('Şifre ve şifre tekrarı eşleşmiyor', 'warning');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/members/${memberId}/password`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({ password })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data.error || 'Şifre güncellenemedi');
+        }
+        showAlert('Şifre başarıyla güncellendi', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('changePasswordModal'))?.hide();
+    } catch (error) {
+        console.error('Error updating member password:', error);
+        showAlert(error.message, 'danger');
+    }
+}
+
+async function deleteMember(memberId, email) {
+    if (!confirm(`${email} kullanıcısını silmek istediğinize emin misiniz?`)) {
+        return;
+    }
+    try {
+        const response = await fetch(`${API_BASE}/members/${memberId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data.error || 'Kullanıcı silinemedi');
+        }
+        showAlert('Kullanıcı silindi', 'success');
+        loadMembers();
+    } catch (error) {
+        console.error('Error deleting member:', error);
+        showAlert(error.message, 'danger');
     }
 }
 
