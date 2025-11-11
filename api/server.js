@@ -1660,6 +1660,30 @@ app.delete('/api/members/:id', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+app.put('/auth/password', requireAuth, async (req, res) => {
+  try {
+    const { current_password: currentPassword, new_password: newPassword } = req.body || {};
+    if (!isValidPassword(newPassword)) {
+      return res.status(400).json({ error: 'Yeni şifre en az 8 karakter olmalıdır' });
+    }
+    const member = await pool.query('SELECT id, password_hash FROM members WHERE id = $1', [req.user.id]);
+    if (member.rowCount === 0) {
+      return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+    }
+    if (member.rows[0].password_hash) {
+      const matches = await bcrypt.compare(currentPassword || '', member.rows[0].password_hash);
+      if (!matches) {
+        return res.status(400).json({ error: 'Mevcut şifre yanlış' });
+      }
+    }
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await pool.query('UPDATE members SET password_hash = $1 WHERE id = $2', [passwordHash, req.user.id]);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Start server
 async function startServer() {
   await waitForDatabase();

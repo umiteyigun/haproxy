@@ -43,6 +43,10 @@ function setAuthUI() {
     document.getElementById('auth-status').textContent = loggedIn ? 'Oturum: Açık' : 'Oturum: Kapalı';
     document.getElementById('loginBtn').classList.toggle('d-none', loggedIn);
     document.getElementById('logoutBtn').classList.toggle('d-none', !loggedIn);
+    const selfPasswordBtn = document.getElementById('changeSelfPasswordBtn');
+    if (selfPasswordBtn) {
+        selfPasswordBtn.classList.toggle('d-none', !loggedIn);
+    }
 }
 
 function showLoginModal() { window.location.href = 'login.html'; }
@@ -2621,6 +2625,52 @@ function showAddMemberModal() {
         form.reset();
     }
     new bootstrap.Modal(document.getElementById('addMemberModal')).show();
+}
+
+function showSelfPasswordModal() {
+    if (!authToken) {
+        showLoginModal();
+        return;
+    }
+    const form = document.getElementById('selfPasswordForm');
+    if (form) form.reset();
+    new bootstrap.Modal(document.getElementById('selfPasswordModal')).show();
+}
+
+async function updateSelfPassword() {
+    const form = document.getElementById('selfPasswordForm');
+    const currentPassword = form.querySelector('[name="current_password"]').value;
+    const newPassword = form.querySelector('[name="new_password"]').value;
+    const confirmPassword = form.querySelector('[name="new_password_confirm"]').value;
+
+    if (!newPassword || newPassword.length < 8) {
+        showAlert('Yeni şifre en az 8 karakter olmalıdır', 'warning');
+        return;
+    }
+    if (newPassword !== confirmPassword) {
+        showAlert('Yeni şifre ve tekrarı eşleşmiyor', 'warning');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${AUTH_BASE}/auth/password`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data.error || 'Şifre güncellenemedi');
+        }
+        showAlert('Şifreniz başarıyla güncellendi', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('selfPasswordModal'))?.hide();
+    } catch (error) {
+        console.error('Error updating self password:', error);
+        showAlert(error.message, 'danger');
+    }
 }
 
 async function saveMember() {
