@@ -1,0 +1,91 @@
+services:
+  haproxy:
+    image: haproxy:2.8-alpine
+    container_name: haproxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8404:8404"  # HAProxy stats
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:rw
+      - ./haproxy/config.d:/usr/local/etc/haproxy/config.d:ro
+      - ./haproxy/maps:/usr/local/etc/haproxy/maps:ro
+      - ./haproxy/certs:/etc/ssl/certs/haproxy:ro
+      - ./haproxy/sockets:/var/run/haproxy
+      - ./logs/haproxy:/var/log/haproxy
+    depends_on:
+      - api
+    networks:
+      - haproxy-network
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: haproxy-api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./haproxy/config.d:/app/config/haproxy
+      - ./haproxy/maps:/app/config/haproxy_maps
+      - ./haproxy/haproxy.cfg:/app/config/haproxy/haproxy.cfg:rw
+      - ./certbot/conf:/app/config/certbot
+      - ./certbot/creds:/app/config/certbot/creds:ro
+      - ./certbot/www:/app/config/certbot-www
+      - ./haproxy/certs:/app/config/haproxy-certs
+      - ./haproxy/sockets:/app/sockets
+      - ./data/api:/app/data
+      - ./logs/api:/app/logs
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=haproxy
+      - DB_USER=haproxy
+      - DB_PASSWORD=haproxy_password_change_me
+      - HAPROXY_SOCKET=/app/sockets/haproxy.sock
+      - JWT_SECRET=${JWT_SECRET:-change_this_secret}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin12345}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_FILE=/app/logs/api.log
+    networks:
+      - haproxy-network
+    depends_on:
+      - db
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: haproxy-web
+    restart: unless-stopped
+    volumes:
+      - ./web:/var/www/html:ro
+      - ./certbot/www:/var/www/html/.well-known/acme-challenge:ro
+    depends_on:
+      - api
+    networks:
+      - haproxy-network
+
+  db:
+    image: postgres:15-alpine
+    container_name: haproxy-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=haproxy
+      - POSTGRES_USER=haproxy
+      - POSTGRES_PASSWORD=haproxy_password_change_me
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    networks:
+      - haproxy-network
+
+networks:
+  haproxy-network:
+    driver: bridge
+
+# Removed unused postgres_data volume - using bind mount instead

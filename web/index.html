@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HAProxy Yönetim Paneli</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    <style>
+        body {
+            background-color: #f4f6f9;
+        }
+        .sidebar {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+        }
+        .sidebar h3 {
+            margin-bottom: 30px;
+            font-weight: bold;
+        }
+        .nav-link {
+            color: rgba(255,255,255,0.8);
+            padding: 12px 15px;
+            margin: 5px 0;
+            border-radius: 8px;
+            transition: all 0.3s;
+        }
+        .nav-link:hover, .nav-link.active {
+            background-color: rgba(255,255,255,0.2);
+            color: white;
+        }
+        .main-content {
+            padding: 30px;
+        }
+        .card {
+            border: none;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .card-header {
+            background-color: #fff;
+            border-bottom: 2px solid #667eea;
+            font-weight: bold;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+        }
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+        }
+        .table-responsive {
+            border-radius: 8px;
+        }
+        .badge-success {
+            background-color: #28a745;
+        }
+        .badge-danger {
+            background-color: #dc3545;
+        }
+        .step-guide .step {
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .step-guide .step:last-child {
+            border-bottom: none;
+        }
+        .font-monospace {
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        .dns-status-success {
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+            color: #155724;
+        }
+        .dns-status-warning {
+            background-color: #fff3cd;
+            border-color: #ffeaa7;
+            color: #856404;
+        }
+        .dns-status-error {
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <div class="col-md-2 sidebar">
+                <h3><i class="bi bi-router"></i> HAProxy</h3>
+                <ul class="nav flex-column">
+                    <li class="nav-item mb-3">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span id="auth-status" class="small opacity-75">Oturum: Kapalı</span>
+                            <button class="btn btn-light btn-sm" onclick="showLoginModal()" id="loginBtn">Giriş</button>
+                            <button class="btn btn-outline-light btn-sm d-none" onclick="logout()" id="logoutBtn">Çıkış</button>
+                        </div>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="#" onclick="showSection('ingress')">
+                            <i class="bi bi-diagram-3"></i> Ingress Kuralları
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="showSection('portforward')">
+                            <i class="bi bi-arrow-left-right"></i> Port Forwarding
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="showSection('ssl')">
+                            <i class="bi bi-shield-lock"></i> SSL Sertifikaları
+                        </a>
+                    </li>
+                </ul>
+            </div>
+
+            <!-- Main Content -->
+            <div class="col-md-10 main-content">
+                <!-- Ingress Rules Section -->
+                <div id="ingress-section" class="section">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-diagram-3"></i> Ingress Kuralları</span>
+                            <button class="btn btn-primary btn-sm" onclick="showAddIngressModal()">
+                                <i class="bi bi-plus-circle"></i> Yeni Kural Ekle
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-hover">
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>İsim</th>
+                                            <th>Domain</th>
+                                            <th>Path</th>
+                                            <th>Backend</th>
+                                            <th>SSL</th>
+                                            <th>Durum</th>
+                                            <th>İşlemler</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="ingress-table-body">
+                                        <tr>
+                                            <td colspan="8" class="text-center">Yükleniyor...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Port Forwarding Section -->
+                <div id="portforward-section" class="section" style="display: none;">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-arrow-left-right"></i> Port Forwarding Kuralları</span>
+                            <button class="btn btn-primary btn-sm" onclick="showAddPortForwardModal()">
+                                <i class="bi bi-plus-circle"></i> Yeni Port Forwarding Ekle
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-hover">
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>İsim</th>
+                                            <th>Frontend Port</th>
+                                            <th>Backend Host:Port</th>
+                                            <th>Protokol</th>
+                                            <th>Durum</th>
+                                            <th>İşlemler</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="portforward-table-body">
+                                        <tr>
+                                            <td colspan="7" class="text-center">Yükleniyor...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SSL Certificates Section -->
+                <div id="ssl-section" class="section" style="display: none;">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-shield-lock"></i> SSL Sertifikaları</span>
+                            <button class="btn btn-primary btn-sm" onclick="showAddSSLCertModal()">
+                                <i class="bi bi-plus-circle"></i> Yeni Sertifika Ekle
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-hover">
+                                    <thead>
+                                        <tr>
+                                            <th>Domain</th>
+                                            <th>Tür</th>
+                                            <th>DNS Sağlayıcı</th>
+                                            <th>Bitiş</th>
+                                            <th>Güncelleme</th>
+                                            <th>İşlem</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="ssl-table-body">
+                                        <tr>
+                                            <td colspan="6" class="text-center">Henüz sertifika yok</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Ingress Modal -->
+    <div class="modal fade" id="addIngressModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Yeni Ingress Kuralı</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="addIngressForm">
+                        <input type="hidden" name="id" value="">
+                        <div class="mb-3">
+                            <label class="form-label">İsim</label>
+                            <input type="text" class="form-control" name="name" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Domain</label>
+                            <input type="text" class="form-control" name="domain" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Path (Opsiyonel)</label>
+                            <input type="text" class="form-control" name="path" placeholder="/api">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Backend Host</label>
+                            <input type="text" class="form-control" name="backend_host" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Backend Port</label>
+                            <input type="number" class="form-control" name="backend_port" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Load Balancing Modu</label>
+                            <select class="form-select" name="lb_mode" id="lbMode">
+                                <option value="roundrobin" selected>Yük Dengeleme (Round Robin)</option>
+                                <option value="failover">Failover (Ana + Yedek)</option>
+                            </select>
+                            <small class="form-text text-muted">Failover modunda ilk sunucu ana, diğerleri yedek olarak kullanılır.</small>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Ek Backend Sunucuları</label>
+                            <textarea class="form-control" name="backend_targets" id="backendTargets" rows="3" placeholder="host2:80&#10;host3:8080"></textarea>
+                            <small class="form-text text-muted">Her satıra bir <code>host:port</code>. Failover modunda bu sunucular ana sunucuya yedek olarak eklenir.</small>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">SSL Sertifikası</label>
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="radio" name="ssl_type" id="sslNone" value="none" checked onchange="toggleSSLSelection()">
+                                <label class="form-check-label" for="sslNone">
+                                    SSL Yok (HTTP)
+                                </label>
+                            </div>
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="radio" name="ssl_type" id="sslSelect" value="select" onchange="toggleSSLSelection()">
+                                <label class="form-check-label" for="sslSelect">
+                                    Mevcut SSL Sertifikası Kullan
+                                </label>
+                            </div>
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="radio" name="ssl_type" id="sslNew" value="new" onchange="toggleSSLSelection()">
+                                <label class="form-check-label" for="sslNew">
+                                    Yeni SSL Sertifikası Al
+                                </label>
+                            </div>
+                        </div>
+                        <div class="mb-3" id="sslSelectGroup" style="display: none;">
+                            <label class="form-label">SSL Sertifikası Seç <span class="text-danger">*</span></label>
+                            <select class="form-select" name="ssl_cert_id" id="sslCertSelect">
+                                <option value="">Yükleniyor...</option>
+                            </select>
+                            <small class="form-text text-muted">Mevcut sertifikalar arasından seçin (wildcard SSL'ler uyumlu domain'lerde kullanılabilir)</small>
+                        </div>
+                        <div class="mb-3" id="sslNewGroup" style="display: none;">
+                            <label class="form-label">SSL Tipi</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="new_ssl_type" id="newSslNormal" value="normal" checked onchange="toggleDNSProvider()">
+                                <label class="form-check-label" for="newSslNormal">
+                                    Normal SSL (domain.com) - Webroot Challenge
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="new_ssl_type" id="newSslWildcard" value="wildcard" onchange="toggleDNSProvider()">
+                                <label class="form-check-label" for="newSslWildcard">
+                                    Wildcard SSL (*.domain.com) - DNS Challenge
+                                </label>
+                            </div>
+                        </div>
+                        <div class="mb-3" id="dnsProviderGroup" style="display: none;">
+                            <label class="form-label">DNS Provider <span class="text-danger">*</span></label>
+                            <select class="form-select" name="dns_provider" id="dnsProvider" onchange="toggleAPIKeyInput()">
+                                <option value="">Seçiniz</option>
+                                <option value="cloudflare">Cloudflare</option>
+                                <option value="route53">AWS Route53</option>
+                                <option value="digitalocean">DigitalOcean</option>
+                                <option value="godaddy">GoDaddy</option>
+                                <option value="he-net">Hurricane Electric (dns.he.net) - Manuel DNS</option>
+                            </select>
+                            <small class="form-text text-muted" id="dnsProviderHelp">DNS credentials dosyasını /app/config/certbot/creds/ klasörüne eklemeniz gerekiyor</small>
+                            <div class="alert alert-warning mt-2" id="heNetWarning" style="display: none;">
+                                <strong>Not:</strong> Hurricane Electric için resmi API yoktur. Wildcard SSL için manuel DNS challenge gerekir. Certbot size TXT kaydını gösterecek, bunu dns.he.net'ten manuel olarak eklemeniz gerekecek.
+                            </div>
+                        </div>
+
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="redirectToHttps" name="redirect_to_https" disabled>
+                            <label class="form-check-label" for="redirectToHttps">HTTP (80) isteklerini bu domain için HTTPS'e yönlendir</label>
+                            <small class="form-text text-muted">Yalnızca SSL etkin olduğunda kullanılabilir. Diğer ingress kurallarını etkilemez.</small>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
+                    <button type="button" class="btn btn-primary" onclick="saveIngressRule()">Kaydet</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Login modal removed; dedicated login.html is used -->
+
+    <!-- Add Port Forward Modal -->
+    <div class="modal fade" id="addPortForwardModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Yeni Port Forwarding</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="addPortForwardForm">
+                        <input type="hidden" name="id" value="">
+                        <div class="mb-3">
+                            <label class="form-label">İsim</label>
+                            <input type="text" class="form-control" name="name" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Frontend Port</label>
+                            <input type="number" class="form-control" name="frontend_port" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Backend Host</label>
+                            <input type="text" class="form-control" name="backend_host" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Backend Port</label>
+                            <input type="number" class="form-control" name="backend_port" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Protokol</label>
+                            <select class="form-select" name="protocol">
+                                <option value="tcp">TCP</option>
+                                <option value="http">HTTP</option>
+                            </select>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
+                    <button type="button" class="btn btn-primary" onclick="savePortForwardRule()">Kaydet</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add SSL Certificate Modal -->
+    <!-- DNS Challenge Modal -->
+    <div class="modal fade" id="dnsChallengeModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header bg-warning text-dark">
+                    <h5 class="modal-title">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        Manuel DNS Challenge Gerekli
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <strong><i class="bi bi-info-circle"></i> Wildcard SSL sertifikası için DNS challenge gerekli!</strong><br>
+                        Aşağıdaki TXT kaydını DNS sağlayıcınıza ekleyin ve DNS yayılımını bekleyin.
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-header bg-primary text-white">
+                                    <h6 class="mb-0"><i class="bi bi-globe"></i> Domain Bilgileri</h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">SSL Domain:</label>
+                                        <div class="bg-light p-2 rounded border" id="dnsChallengeDomain">-</div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">Base Domain:</label>
+                                        <div class="bg-light p-2 rounded border" id="dnsChallengeBaseDomain">-</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-header bg-success text-white">
+                                    <h6 class="mb-0"><i class="bi bi-clipboard-data"></i> DNS Kaydı Bilgileri</h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">TXT Record Name:</label>
+                                        <div class="input-group">
+                                            <input type="text" class="form-control font-monospace" id="dnsChallengeName" readonly>
+                                            <button class="btn btn-outline-secondary" type="button" onclick="copyToClipboard('dnsChallengeName')" title="Kopyala">
+                                                <i class="bi bi-clipboard"></i>
+                                            </button>
+                                        </div>
+                                        <div class="form-text">Bu isimle TXT kaydı oluşturun</div>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">TXT Record Value:</label>
+                                        <div class="input-group">
+                                            <input type="text" class="form-control font-monospace" id="dnsChallengeValue" readonly>
+                                            <button class="btn btn-outline-secondary" type="button" onclick="copyToClipboard('dnsChallengeValue')" title="Kopyala">
+                                                <i class="bi bi-clipboard"></i>
+                                            </button>
+                                        </div>
+                                        <div class="form-text">Bu değeri TXT kaydının içeriği olarak girin</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row mt-3">
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-header bg-info text-white">
+                                    <h6 class="mb-0"><i class="bi bi-list-ol"></i> Adım Adım Rehber</h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="step-guide">
+                                        <div class="step mb-2">
+                                            <span class="badge bg-primary rounded-pill me-2">1</span>
+                                            DNS sağlayıcınıza (dns.he.net) giriş yapın
+                                        </div>
+                                        <div class="step mb-2">
+                                            <span class="badge bg-primary rounded-pill me-2">2</span>
+                                            Domain'inize (<span id="dnsChallengeBaseDomainDisplay" class="fw-bold">-</span>) gidin
+                                        </div>
+                                        <div class="step mb-2">
+                                            <span class="badge bg-primary rounded-pill me-2">3</span>
+                                            Yukarıdaki TXT kaydını ekleyin
+                                        </div>
+                                        <div class="step mb-2">
+                                            <span class="badge bg-warning rounded-pill me-2">4</span>
+                                            2-10 dakika bekleyin (DNS propagation)
+                                        </div>
+                                        <div class="step mb-2">
+                                            <span class="badge bg-success rounded-pill me-2">5</span>
+                                            DNS kontrolünü çalıştırın ve "Tekrar Dene" butonuna basın
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-header bg-secondary text-white">
+                                    <h6 class="mb-0"><i class="bi bi-search"></i> DNS Yayılım Kontrolü</h6>
+                                </div>
+                                <div class="card-body">
+                                    <div id="dns-checker">
+                                        <!-- DNS checker will be populated by JavaScript -->
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="alert alert-warning mt-3">
+                        <h6><i class="bi bi-clock"></i> Önemli Notlar:</h6>
+                        <ul class="mb-0">
+                            <li>TXT kaydı ekledikten sonra DNS yayılımı için 2-10 dakika bekleyin</li>
+                            <li>DNS kontrolü yeşil olduğunda "Tekrar Dene" butonuna basabilirsiniz</li>
+                            <li>Eğer sorun yaşıyorsanız SSH Terminal'i kullanarak manuel kontrol yapabilirsiniz</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <div class="me-auto">
+                        <button type="button" class="btn btn-info" onclick="openTerminal()" title="SSH Terminal Aç">
+                            <i class="bi bi-terminal"></i> SSH Terminal
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="showDebugOutput()" title="Debug Çıktısı">
+                            <i class="bi bi-code-square"></i> Debug
+                        </button>
+                    </div>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="bi bi-x-circle"></i> Kapat
+                    </button>
+                    <button type="button" class="btn btn-primary" onclick="retryDNSChallenge()" id="retryDnsBtn">
+                        <i class="bi bi-arrow-clockwise"></i> Tekrar Dene
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="addSSLCertModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Yeni SSL Sertifikası</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="addSSLCertForm">
+                        <div class="mb-3">
+                            <label class="form-label">Domain</label>
+                            <input type="text" class="form-control" name="domain" placeholder="example.com veya *.example.com" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">SSL Tipi</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="ssl_type" id="sslCertNormal" value="normal" checked onchange="toggleSSLCertDNSProvider()">
+                                <label class="form-check-label" for="sslCertNormal">
+                                    Normal SSL (domain.com) - Webroot Challenge
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="ssl_type" id="sslCertWildcard" value="wildcard" onchange="toggleSSLCertDNSProvider()">
+                                <label class="form-check-label" for="sslCertWildcard">
+                                    Wildcard SSL (*.domain.com) - DNS Challenge
+                                </label>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">E-posta</label>
+                            <input type="email" class="form-control" name="email" required>
+                        </div>
+                        <div class="mb-3" id="sslCertDNSProviderGroup" style="display: none;">
+                            <label class="form-label">DNS Provider <span class="text-danger">*</span></label>
+                            <select class="form-select" name="dns_provider" id="sslCertDNSProvider" onchange="toggleSSLCertAPIKeyInput()">
+                                <option value="">Seçiniz</option>
+                                <option value="cloudflare">Cloudflare</option>
+                                <option value="route53">AWS Route53</option>
+                                <option value="digitalocean">DigitalOcean</option>
+                                <option value="godaddy">GoDaddy</option>
+                                <option value="he-net">Hurricane Electric (dns.he.net) - Manuel DNS</option>
+                            </select>
+                            <small class="form-text text-muted" id="sslCertDNSProviderHelp">DNS credentials dosyasını /app/config/certbot/creds/ klasörüne eklemeniz gerekiyor</small>
+                            <div class="alert alert-warning mt-2" id="sslCertHeNetWarning" style="display: none;">
+                                <strong>Not:</strong> Hurricane Electric için resmi API yoktur. Wildcard SSL için manuel DNS challenge gerekir. Certbot size TXT kaydını gösterecek, bunu dns.he.net'ten manuel olarak eklemeniz gerekecek.
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
+                    <button type="button" class="btn btn-primary" onclick="saveSSLCertificate()">Sertifika Al</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Debug Output Modal -->
+    <div class="modal fade" id="debugOutputModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header bg-dark text-white">
+                    <h5 class="modal-title">🔍 Certbot Debug Çıktısı (SSH gibi canlı görünüm)</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Komut:</label>
+                        <pre class="bg-dark text-light p-2 rounded" id="debugCommand"></pre>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Çıktı (STDOUT + STDERR):</label>
+                        <pre class="bg-dark text-light p-3 rounded" id="debugOutput" style="max-height: 500px; overflow-y: auto; font-family: 'Courier New', monospace; white-space: pre-wrap; word-wrap: break-word;"></pre>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Exit Code:</label>
+                        <span class="badge bg-secondary" id="debugExitCode">-</span>
+                    </div>
+                    <div class="alert alert-info">
+                        <strong>Not:</strong> Bu çıktı, Certbot'un SSH terminalinde çalıştırıldığında göreceğiniz çıktıdır.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Kapat</button>
+                    <button type="button" class="btn btn-primary" onclick="runDebugCommand()">
+                        <i class="bi bi-play-circle"></i> Komutu Tekrar Çalıştır
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Terminal Modal -->
+    <div class="modal fade" id="terminalModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog modal-fullscreen-lg-down">
+            <div class="modal-content">
+                <div class="modal-header bg-dark text-white">
+                    <h5 class="modal-title">🖥️ SSH Terminal - Certbot Container</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" onclick="disconnectTerminal()"></button>
+                </div>
+                <div class="modal-body p-0">
+                    <div id="terminal" style="width: 100%; height: 600px; background: #000; padding: 10px;"></div>
+                </div>
+                <div class="modal-footer bg-dark">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" onclick="disconnectTerminal()">Kapat</button>
+                    <button type="button" class="btn btn-warning" onclick="clearTerminal()">Temizle</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sertifika Detay Modal -->
+    <div class="modal fade" id="certificateDetailModal" tabindex="-1" aria-labelledby="certificateDetailLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title" id="certificateDetailLabel"><i class="bi bi-shield-lock me-2"></i>Sertifika Detayı</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Kapat"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <div class="mb-2"><strong>Cert Domain:</strong> <span id="detailCertDomain">-</span></div>
+                            <div class="mb-2"><strong>Domain:</strong> <span id="detailDomain">-</span></div>
+                            <div class="mb-2"><strong>Tür:</strong> <span id="detailType">-</span></div>
+                            <div class="mb-2"><strong>DNS Sağlayıcı:</strong> <span id="detailDNSProvider">-</span></div>
+                            <div class="mb-2"><strong>E-posta:</strong> <span id="detailEmail">-</span></div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-2"><strong>Bitiş Tarihi:</strong> <span id="detailExpires">-</span></div>
+                            <div class="mb-2"><strong>Oluşturulma:</strong> <span id="detailCreated">-</span></div>
+                            <div class="mb-2"><strong>Güncelleme:</strong> <span id="detailUpdated">-</span></div>
+                            <div class="mb-2"><strong>Certbot Klasörü:</strong> <span id="detailCertbotPath">-</span></div>
+                            <div class="mb-2"><strong>HAProxy Sertifika:</strong> <span id="detailHaproxyPath">-</span></div>
+                        </div>
+                    </div>
+
+                    <hr>
+                    <h6>Metaveri</h6>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <div class="mb-2"><strong>Subject:</strong> <span id="detailSubject">-</span></div>
+                            <div class="mb-2"><strong>Issuer:</strong> <span id="detailIssuer">-</span></div>
+                            <div class="mb-2"><strong>Serial:</strong> <span id="detailSerial">-</span></div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-2"><strong>Başlangıç:</strong> <span id="detailNotBefore">-</span></div>
+                            <div class="mb-2"><strong>Bitiş:</strong> <span id="detailNotAfter">-</span></div>
+                        </div>
+                    </div>
+
+                    <hr>
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="mb-0">Sertifika İçeriği (Fullchain)</h6>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="copyCertificateContent()">
+                            <i class="bi bi-clipboard"></i> Kopyala
+                        </button>
+                    </div>
+                    <textarea id="detailCertificateBody" class="form-control" rows="10" readonly spellcheck="false"></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Kapat</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+    <script src="app.js"></script>
+</body>
+</html>
+

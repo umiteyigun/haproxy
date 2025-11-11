@@ -1,0 +1,138 @@
+2025-11-06 14:38:18,871:DEBUG:certbot._internal.main:certbot version: 5.1.0
+2025-11-06 14:38:18,872:DEBUG:certbot._internal.main:Location of certbot entry point: /usr/local/bin/certbot
+2025-11-06 14:38:18,872:DEBUG:certbot._internal.main:Arguments: ['--manual', '--config-dir', '/etc/letsencrypt', '--work-dir', '/tmp/certbot-work', '--logs-dir', '/var/log/letsencrypt', '--preferred-challenges', 'dns', '--email', 'aslan41@gmail.com', '--agree-tos', '--no-eff-email', '--keep-until-expiring', '-d', '*.trtek.tr', '-d', 'trtek.tr']
+2025-11-06 14:38:18,872:DEBUG:certbot._internal.main:Discovered plugins: PluginsRegistry(PluginEntryPoint#certbot-route53:auth,PluginEntryPoint#dns-cloudflare,PluginEntryPoint#dns-digitalocean,PluginEntryPoint#dns-dnsimple,PluginEntryPoint#dns-godaddy,PluginEntryPoint#dns-google,PluginEntryPoint#dns-ovh,PluginEntryPoint#dns-rfc2136,PluginEntryPoint#dns-route53,PluginEntryPoint#manual,PluginEntryPoint#null,PluginEntryPoint#standalone,PluginEntryPoint#webroot)
+2025-11-06 14:38:19,012:DEBUG:certbot._internal.log:Root logging level set at 30
+2025-11-06 14:38:19,014:DEBUG:certbot._internal.plugins.selection:Requested authenticator manual and installer None
+2025-11-06 14:38:19,014:DEBUG:certbot._internal.plugins.selection:Single candidate plugin: * manual
+Description: Manual configuration or run your own shell scripts
+Interfaces: Authenticator, Plugin
+Entry point: EntryPoint(name='manual', value='certbot._internal.plugins.manual:Authenticator', group='certbot.plugins')
+Initialized: <certbot._internal.plugins.manual.Authenticator object at 0xffff83980380>
+Prep: True
+2025-11-06 14:38:19,015:DEBUG:certbot._internal.plugins.selection:Selected authenticator <certbot._internal.plugins.manual.Authenticator object at 0xffff83980380> and installer None
+2025-11-06 14:38:19,015:INFO:certbot._internal.plugins.selection:Plugins selected: Authenticator manual, Installer None
+2025-11-06 14:38:19,148:DEBUG:certbot._internal.main:Picked account: <Account(RegistrationResource(body=Registration(key=None, contact=(), agreement=None, status=None, terms_of_service_agreed=None, only_return_existing=None, external_account_binding=None), uri='https://acme-v02.api.letsencrypt.org/acme/acct/2774685911', new_authzr_uri=None, terms_of_service=None), 1c2c22ea13ac504f71fb66d5d9116d28, Meta(creation_dt=datetime.datetime(2025, 11, 4, 13, 30, 10, tzinfo=datetime.timezone.utc), creation_host='e60781bdff11', register_to_eff=None))>
+2025-11-06 14:38:19,148:DEBUG:acme.client:Sending GET request to https://acme-v02.api.letsencrypt.org/directory.
+2025-11-06 14:38:19,149:DEBUG:urllib3.connectionpool:Starting new HTTPS connection (1): acme-v02.api.letsencrypt.org:443
+2025-11-06 14:38:19,827:DEBUG:urllib3.connectionpool:https://acme-v02.api.letsencrypt.org:443 "GET /directory HTTP/1.1" 200 1065
+2025-11-06 14:38:19,827:DEBUG:acme.client:Received response:
+HTTP 200
+Server: nginx
+Date: Thu, 06 Nov 2025 14:38:19 GMT
+Content-Type: application/json
+Content-Length: 1065
+Connection: keep-alive
+Cache-Control: public, max-age=0, no-cache
+X-Frame-Options: DENY
+Strict-Transport-Security: max-age=604800
+
+{
+  "7Cj8eZILwq8": "https://community.letsencrypt.org/t/adding-random-entries-to-the-directory/33417",
+  "keyChange": "https://acme-v02.api.letsencrypt.org/acme/key-change",
+  "meta": {
+    "caaIdentities": [
+      "letsencrypt.org"
+    ],
+    "profiles": {
+      "classic": "https://letsencrypt.org/docs/profiles#classic",
+      "shortlived": "https://letsencrypt.org/docs/profiles#shortlived (not yet generally available)",
+      "tlsclient": "https://letsencrypt.org/docs/profiles#tlsclient",
+      "tlsserver": "https://letsencrypt.org/docs/profiles#tlsserver"
+    },
+    "termsOfService": "https://letsencrypt.org/documents/LE-SA-v1.5-February-24-2025.pdf",
+    "website": "https://letsencrypt.org"
+  },
+  "newAccount": "https://acme-v02.api.letsencrypt.org/acme/new-acct",
+  "newNonce": "https://acme-v02.api.letsencrypt.org/acme/new-nonce",
+  "newOrder": "https://acme-v02.api.letsencrypt.org/acme/new-order",
+  "renewalInfo": "https://acme-v02.api.letsencrypt.org/acme/renewal-info",
+  "revokeCert": "https://acme-v02.api.letsencrypt.org/acme/revoke-cert"
+}
+2025-11-06 14:38:19,831:DEBUG:certbot._internal.display.obj:Notifying user: Requesting a certificate for *.trtek.tr and trtek.tr
+2025-11-06 14:38:19,832:DEBUG:acme.client:Requesting fresh nonce
+2025-11-06 14:38:19,833:DEBUG:acme.client:Sending HEAD request to https://acme-v02.api.letsencrypt.org/acme/new-nonce.
+2025-11-06 14:38:20,026:DEBUG:urllib3.connectionpool:https://acme-v02.api.letsencrypt.org:443 "HEAD /acme/new-nonce HTTP/1.1" 200 0
+2025-11-06 14:38:20,032:DEBUG:acme.client:Received response:
+HTTP 200
+Server: nginx
+Date: Thu, 06 Nov 2025 14:38:20 GMT
+Connection: keep-alive
+Cache-Control: public, max-age=0, no-cache
+Link: <https://acme-v02.api.letsencrypt.org/directory>;rel="index"
+Replay-Nonce: YicTj_5nQqbdfsSobEEKcmWAl52_cuHQzr01jk_9Di7pRhWVr2s
+X-Frame-Options: DENY
+Strict-Transport-Security: max-age=604800
+
+
+2025-11-06 14:38:20,032:DEBUG:acme.client:Storing nonce: YicTj_5nQqbdfsSobEEKcmWAl52_cuHQzr01jk_9Di7pRhWVr2s
+2025-11-06 14:38:20,032:DEBUG:acme.client:JWS payload:
+b'{\n  "identifiers": [\n    {\n      "type": "dns",\n      "value": "*.trtek.tr"\n    },\n    {\n      "type": "dns",\n      "value": "trtek.tr"\n    }\n  ]\n}'
+2025-11-06 14:38:20,034:DEBUG:acme.client:Sending POST request to https://acme-v02.api.letsencrypt.org/acme/new-order:
+{
+  "protected": "eyJhbGciOiAiUlMyNTYiLCAia2lkIjogImh0dHBzOi8vYWNtZS12MDIuYXBpLmxldHNlbmNyeXB0Lm9yZy9hY21lL2FjY3QvMjc3NDY4NTkxMSIsICJub25jZSI6ICJZaWNUal81blFxYmRmc1NvYkVFS2NtV0FsNTJfY3VIUXpyMDFqa185RGk3cFJoV1ZyMnMiLCAidXJsIjogImh0dHBzOi8vYWNtZS12MDIuYXBpLmxldHNlbmNyeXB0Lm9yZy9hY21lL25ldy1vcmRlciJ9",
+  "signature": "DfQ22xubUO4BdC5QDQcK1ObE9_ZoTlZZ4TyvfW8CBwlFSorktYVoBrVqfOB_uY7hYE_s2lpJhJKAAT2frhWbZI8EE0Ycv9hvc6j0YCTgRO2Kz--x6s05fStx1ZhT4b_Y6GJ9qfwRPz6opabuMPgAl0Q00_4OoDciyhXCLPMP2Tv1szyUwu4xdYgLL-M1U4Q5Nznf5-rEO2VevXsiEh-UJYByH9G-sbUK2CNYzl9z100L2ecEStis1p4dkVdn0qVl_R3mSwp0bqJjaOLqc-FlpdG6MSh-7brLX_JrSSNIG_9vP08Te1fZEEBkT8Cuawas39ccu2Wv9U0phH8-o6xWDw",
+  "payload": "ewogICJpZGVudGlmaWVycyI6IFsKICAgIHsKICAgICAgInR5cGUiOiAiZG5zIiwKICAgICAgInZhbHVlIjogIioudHJ0ZWsudHIiCiAgICB9LAogICAgewogICAgICAidHlwZSI6ICJkbnMiLAogICAgICAidmFsdWUiOiAidHJ0ZWsudHIiCiAgICB9CiAgXQp9"
+}
+2025-11-06 14:38:20,243:DEBUG:urllib3.connectionpool:https://acme-v02.api.letsencrypt.org:443 "POST /acme/new-order HTTP/1.1" 429 289
+2025-11-06 14:38:20,244:DEBUG:acme.client:Received response:
+HTTP 429
+Server: nginx
+Date: Thu, 06 Nov 2025 14:38:20 GMT
+Content-Type: application/problem+json
+Content-Length: 289
+Connection: keep-alive
+Boulder-Requester: 2774685911
+Cache-Control: public, max-age=0, no-cache
+Link: <https://acme-v02.api.letsencrypt.org/directory>;rel="index", <https://letsencrypt.org/docs/rate-limits>;rel="help"
+Replay-Nonce: YicTj_5niDDnx8tJC2V2gU8h6j2Gq7zQS7N5tDAIwDAMEUKoxuE
+Retry-After: 353
+
+{
+  "type": "urn:ietf:params:acme:error:rateLimited",
+  "detail": "too many failed authorizations (5) for \"trtek.tr\" in the last 1h0m0s, retry after 2025-11-06 14:44:13 UTC: see https://letsencrypt.org/docs/rate-limits/#authorization-failures-per-hostname-per-account",
+  "status": 429
+}
+2025-11-06 14:38:20,244:DEBUG:certbot._internal.log:Exiting abnormally:
+Traceback (most recent call last):
+  File "/usr/local/bin/certbot", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/opt/certbot/src/certbot/src/certbot/main.py", line 18, in main
+    return internal_main.main(cli_args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/certbot/src/certbot/src/certbot/_internal/main.py", line 1850, in main
+    return config.func(config, plugins)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/certbot/src/certbot/src/certbot/_internal/main.py", line 1562, in certonly
+    lineage = _get_and_save_cert(le_client, config, domains, certname, lineage)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/certbot/src/certbot/src/certbot/_internal/main.py", line 141, in _get_and_save_cert
+    lineage = le_client.obtain_and_enroll_certificate(domains, certname)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/certbot/src/certbot/src/certbot/_internal/client.py", line 526, in obtain_and_enroll_certificate
+    cert, chain, key, _ = self.obtain_certificate(domains)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/certbot/src/certbot/src/certbot/_internal/client.py", line 427, in obtain_certificate
+    orderr = self._get_order_and_authorizations(csr.data, self.config.allow_subset_of_names)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/certbot/src/certbot/src/certbot/_internal/client.py", line 487, in _get_order_and_authorizations
+    orderr = self.acme.new_order(csr_pem, profile=profile)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/certbot/src/acme/src/acme/client.py", line 141, in new_order
+    response = self._post(self.directory['newOrder'], order)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/certbot/src/acme/src/acme/client.py", line 467, in _post
+    return self.net.post(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/certbot/src/acme/src/acme/client.py", line 818, in post
+    return self._post_once(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/certbot/src/acme/src/acme/client.py", line 833, in _post_once
+    response = self._check_response(response, content_type=content_type)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/certbot/src/acme/src/acme/client.py", line 705, in _check_response
+    raise messages.Error.from_json(jobj)
+acme.messages.Error: urn:ietf:params:acme:error:rateLimited :: There were too many requests of a given type :: too many failed authorizations (5) for "trtek.tr" in the last 1h0m0s, retry after 2025-11-06 14:44:13 UTC: see https://letsencrypt.org/docs/rate-limits/#authorization-failures-per-hostname-per-account
+2025-11-06 14:38:20,246:ERROR:certbot._internal.log:An unexpected error occurred:
+2025-11-06 14:38:20,246:ERROR:certbot._internal.log:too many failed authorizations (5) for "trtek.tr" in the last 1h0m0s, retry after 2025-11-06 14:44:13 UTC: see https://letsencrypt.org/docs/rate-limits/#authorization-failures-per-hostname-per-account

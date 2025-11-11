@@ -1,0 +1,6 @@
+# Cloudflare DNS credentials
+# dns_cloudflare_api_token = YOUR_API_TOKEN
+# OR
+# dns_cloudflare_email = your@email.com
+# dns_cloudflare_api_key = YOUR_API_KEY
+
