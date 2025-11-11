@@ -46,7 +46,19 @@ haproxy/
 POSTGRES_PASSWORD: haproxy_password_change_me
 ```
 
-### 3. Başlatma
+### 3. Başlangıç
+
+- Varsayılan yönetici kullanıcı bilgileri `.env`/environment üzerinden oluşturulur. Örnek:
+
+  ```env
+  ADMIN_EMAIL=admin@example.com
+  ADMIN_PASSWORD=admin12345
+  JWT_SECRET=çok-gizli-bir-ifade
+  ```
+
+  API konteyneri ilk açılışta bu bilgileri kullanarak `members` tablosuna bir admin hesabı seed eder. Prod ortamında bu değerleri mutlaka değiştirin.
+
+### 4. Başlatma
 
 ```bash
 docker-compose build --no-cache
