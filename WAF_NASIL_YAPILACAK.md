@@ -30,6 +30,7 @@ Bu doküman, projede planlanan WAF (Web Application Firewall) çalışmalarını
 - `haproxy/haproxy.cfg` – HTTP/HTTPS frontend’lerine SPOE filtreleri ve WAF ACL kuralları eklendi; dinamik placeholder’lar (ACL/redirect/backend) geri yüklendi.
 - `scripts/waf_smoke_test.sh` – İyi ve kötü User-Agent senaryolarını kullanarak WAF’ın temel davranışını otomatik test eden betik.
 - `scripts/waf_audit_report.sh` – ModSecurity `audit.log` dosyasını özetler; `MODSEC_AUDIT_ENGINE=On` ile detaylı kayıt toplamak için kullanılabilir.
+- `modsecurity/rules/crs-998-false-positives.conf` – `/search` endpoint’i için `attack-sqli` etiketli CRS kurallarını güvenli arama senaryolarında saf dışı bırakan özel istisna.
 - `docker-compose.yml` – `MODSEC_RULE_ENGINE` ve `MODSEC_AUDIT_ENGINE` ortam değişkenleriyle DetectionOnly ↔ Block modu kolayca değiştirilebilir (varsayılan `DetectionOnly`).
 
 ### Test Notları
@@ -55,6 +56,7 @@ Bu doküman, projede planlanan WAF (Web Application Firewall) çalışmalarını
 - `Makefile` → `make test-waf` hedefi SPOA/HAProxy imajlarını build edip, stack’i ayağa kaldırarak duman testi çalıştırır.
 - `.github/workflows/waf-ci.yml` → Her push/PR’da WAF bileşenlerini build eder, HAProxy syntax kontrolü yapar ve smoke test betiğini çalıştırır.
 - WAF logları (HAProxy ve ModSecurity) için `make waf-logs` ile hızlı erişim sağlandı. `MODSEC_AUDIT_ENGINE=On` ile daha detaylı ModSecurity audit log’ları alınabilir ve `make waf-report` ile özetlenebilir.
+- Ayrıntılı tuning raporları `docs/WAF_TUNING_REPORT.md` dosyasında tutuluyor.
 - Performans ve latency ölçümleri ile merkezi log/monitoring entegrasyonu sonraki iterasyonlarda tamamlanacak.
 - Bu README ve `docs/WAF_PLAN.md` düzenli olarak güncellenecek.
 

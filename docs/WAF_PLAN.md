@@ -56,6 +56,7 @@
    - `Makefile` içerisindeki `test-waf` hedefi yerelde aynı senaryoyu tekrarlar.
    - `MODSEC_RULE_ENGINE`/`MODSEC_AUDIT_ENGINE` değişkenleri sayesinde bloklama/audit seviyeleri ortam bazlı yönetilebilir.
    - `scripts/waf_audit_report.sh` sayesinde audit logları hızlıca raporlanabilir.
+   - `docs/WAF_TUNING_REPORT.md` faz 2 tuning notlarını içerir.
 2. **Konfigürasyon Yönetimi** 🔄
    - WAF kuralları repo içinde version control (tamamlandı); ortam bazlı override dosyaları ve yayın süreci tanımlanacak.
 3. **Monitoring** 🔄
