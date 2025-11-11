@@ -28,21 +28,19 @@
 ---
 
 ## Faz 2 – ModSecurity + OWASP CRS Entegrasyonu
-1. **ModSecurity Container**
-   - `docker-compose.yml` içine `modsecurity` servisi ekle.
-   - OWASP CRS kural setlerini `modsecurity/rules/` altında tut.
-2. **SPOE Agent**
-   - `haproxytech/spoa-modsecurity` agent’ını kullan veya özel SPOE container oluştur.
-   - HAProxy -> SPOE -> ModSecurity iletişimini MTLS ile güvenli hale getir.
-3. **HAProxy Filter Konfigürasyonu**
-   - `filter spoe engine modsecurity config /etc/haproxy/modsecurity.conf` benzeri yapı.
-   - Tüm HTTP frontend’lerine filter ekle.
-4. **Deneme (Detection) Modu**
-   - İlk etapta sadece loglama, bloklama yok.
-   - False-positive tuning: `SecRuleEngine DetectionOnly`, sonra `On`.
-5. **Log & Alerting**
-   - ModSecurity audit loglarını `logs/modsecurity/` altına yaz.
-   - Opsiyonel: Logları ELK/Grafana’ya yönlendir.
+1. **SPOA İmajı** ✅
+   - `spoa/Dockerfile` ModSecurity 2.9.11 ve OWASP CRS’i derleyerek tek bir konteyner oluşturuyor.
+   - Build sırasında `spoa/spoa.patch` ve `spoa/start.sh` uygulanıyor.
+2. **Docker Compose Güncellemesi** ✅
+   - Ayrı `modsecurity` servisi kaldırıldı; `spoa` servisi depo kökünden build alıyor ve loglar host’a mount ediliyor.
+3. **HAProxy Filter Konfigürasyonu** ✅
+   - `haproxy/haproxy.cfg` frontendlere `filter spoe engine modsecurity config /usr/local/etc/haproxy/modsecurity.conf` eklendi.
+   - `haproxy/modsecurity.conf` içinde `[modsecurity]` bölümü, timeout’lar ve `on-frontend-http-request` event’i tanımlandı.
+4. **Detection Modu** ✅
+   - ModSecurity `SecRuleEngine DetectionOnly` olarak çalışıyor; custom kurallar `modsecurity/rules` altına eklenebiliyor.
+5. **Log & Alerting** 🔄
+   - Şimdilik `/var/log/modsecurity` bind mount ile host’a aktarılıyor.
+   - ELK/Grafana entegrasyonu Faz 3 kapsamında tamamlanacak.
 
 ### Çıktılar
 - Yeni Docker servisi (`modsecurity`, `spoa`).

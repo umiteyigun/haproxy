@@ -11,11 +11,13 @@ services:
       - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:rw
       - ./haproxy/config.d:/usr/local/etc/haproxy/config.d:ro
       - ./haproxy/maps:/usr/local/etc/haproxy/maps:ro
+      - ./haproxy/modsecurity.conf:/usr/local/etc/haproxy/modsecurity.conf:ro
       - ./haproxy/certs:/etc/ssl/certs/haproxy:ro
       - ./haproxy/sockets:/var/run/haproxy
       - ./logs/haproxy:/var/log/haproxy
     depends_on:
       - api
+      - spoa
     networks:
       - haproxy-network
 
@@ -83,6 +85,17 @@ services:
       - ./data/postgres:/var/lib/postgresql/data
     networks:
       - haproxy-network
+
+  spoa:
+    build:
+      context: .
+      dockerfile: spoa/Dockerfile
+    container_name: haproxy-spoa
+    restart: unless-stopped
+    networks:
+      - haproxy-network
+    volumes:
+      - ./modsecurity/logs:/var/log/modsecurity
 
 networks:
   haproxy-network:
