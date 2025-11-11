@@ -96,6 +96,9 @@ services:
       - haproxy-network
     volumes:
       - ./modsecurity/logs:/var/log/modsecurity
+    environment:
+      - MODSEC_RULE_ENGINE=${MODSEC_RULE_ENGINE:-DetectionOnly}
+      - MODSEC_AUDIT_ENGINE=${MODSEC_AUDIT_ENGINE:-RelevantOnly}
 
 networks:
   haproxy-network:

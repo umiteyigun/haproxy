@@ -29,6 +29,7 @@ Bu doküman, projede planlanan WAF (Web Application Firewall) çalışmalarını
 - `haproxy/modsecurity.conf` – `[modsecurity]` bölümü, timeout değerleri ve `on-frontend-http-request` event tanımı ile güncellendi.
 - `haproxy/haproxy.cfg` – HTTP/HTTPS frontend’lerine SPOE filtreleri ve WAF ACL kuralları eklendi; dinamik placeholder’lar (ACL/redirect/backend) geri yüklendi.
 - `scripts/waf_smoke_test.sh` – İyi ve kötü User-Agent senaryolarını kullanarak WAF’ın temel davranışını otomatik test eden betik.
+- `docker-compose.yml` – `MODSEC_RULE_ENGINE` ve `MODSEC_AUDIT_ENGINE` ortam değişkenleriyle DetectionOnly ↔ Block modu kolayca değiştirilebilir (varsayılan `DetectionOnly`).
 
 ### Test Notları
 - Benign istek (301 yönlendirme beklenir):
@@ -52,7 +53,7 @@ Bu doküman, projede planlanan WAF (Web Application Firewall) çalışmalarını
 
 - `Makefile` → `make test-waf` hedefi SPOA/HAProxy imajlarını build edip, stack’i ayağa kaldırarak duman testi çalıştırır.
 - `.github/workflows/waf-ci.yml` → Her push/PR’da WAF bileşenlerini build eder, HAProxy syntax kontrolü yapar ve smoke test betiğini çalıştırır.
-- WAF logları (HAProxy ve ModSecurity) için `make waf-logs` ile hızlı erişim sağlandı.
+- WAF logları (HAProxy ve ModSecurity) için `make waf-logs` ile hızlı erişim sağlandı. `MODSEC_AUDIT_ENGINE=On` ile daha detaylı ModSecurity audit log’ları alınabilir.
 - Performans ve latency ölçümleri ile merkezi log/monitoring entegrasyonu sonraki iterasyonlarda tamamlanacak.
 - Bu README ve `docs/WAF_PLAN.md` düzenli olarak güncellenecek.
 

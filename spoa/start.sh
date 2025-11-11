@@ -1,6 +1,25 @@
 #!/bin/sh
 set -e
 
+RULE_ENGINE=${MODSEC_RULE_ENGINE:-DetectionOnly}
+AUDIT_ENGINE=${MODSEC_AUDIT_ENGINE:-RelevantOnly}
+
+if [ -n "${RULE_ENGINE}" ]; then
+    sed -i -E "s/^SecRuleEngine .*/SecRuleEngine ${RULE_ENGINE}/" /etc/modsecurity/modsecurity.conf
+fi
+
+if [ -n "${AUDIT_ENGINE}" ]; then
+    sed -i -E "s/^SecAuditEngine .*/SecAuditEngine ${AUDIT_ENGINE}/" /etc/modsecurity/modsecurity.conf
+fi
+
+if [ "${RULE_ENGINE}" = "On" ]; then
+    sed -i -E 's/^SecDefaultAction "phase:1.*$/SecDefaultAction "phase:1,log,auditlog,deny,status:403"/' /etc/modsecurity/owasp-modsecurity-crs/crs-setup.conf
+    sed -i -E 's/^SecDefaultAction "phase:2.*$/SecDefaultAction "phase:2,log,auditlog,deny,status:403"/' /etc/modsecurity/owasp-modsecurity-crs/crs-setup.conf
+else
+    sed -i -E 's/^SecDefaultAction "phase:1.*$/SecDefaultAction "phase:1,log,noauditlog,pass"/' /etc/modsecurity/owasp-modsecurity-crs/crs-setup.conf
+    sed -i -E 's/^SecDefaultAction "phase:2.*$/SecDefaultAction "phase:2,log,noauditlog,pass"/' /etc/modsecurity/owasp-modsecurity-crs/crs-setup.conf
+fi
+
 if [ $# -gt 0 ] && [ "$1" = "${1#-}" ]; then
     exec "$@"
     exit
