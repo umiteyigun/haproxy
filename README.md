@@ -168,13 +168,19 @@ curl -X POST http://localhost:3000/api/ssl/request \
 
 An optional Loki + Promtail + Grafana stack is available under `monitoring/`.
 
+### Prerequisites
+- Ana WAF stack’in (`docker-compose up -d haproxy spoa`) çalışıyor olması önerilir; Promtail varsayılan olarak `logs/haproxy` ve `modsecurity/logs` dizinlerini okur.
+- Docker Compose yüklü olmalı.
+- Grafana varsayılan yönetici bilgileri `admin/admin`; `.env` dosyasında `GRAFANA_ADMIN_USER` ve `GRAFANA_ADMIN_PASSWORD` ile özelleştirilebilir.
+
+### Komutlar
 ```bash
 make monitoring-up      # start monitoring containers (Loki, Promtail, Grafana)
 make monitoring-logs    # tail monitoring container logs
 make monitoring-down    # stop and remove monitoring stack
 ```
 
-Grafana listens on <http://localhost:3001/> with default credentials `admin/admin` (overridable via `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD`).
+Grafana arayüzü <http://localhost:3001/> üzerinden erişilebilir. "WAF Logs" dashboard’u varsayılan olarak HAProxy ve ModSecurity loglarını gösterir; logları görebilmek için ilgili servislerin stdout veya dosya çıktılarının Promtail tarafından okunuyor olması yeterlidir.
 
 ## Lisans
 
