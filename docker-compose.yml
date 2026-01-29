@@ -48,6 +48,8 @@ services:
       - acme_sh_data:/root/.acme.sh
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./modsecurity/rules:/app/config/modsecurity-rules:rw
+      - ./modsecurity/crs:/app/config/owasp-crs:rw
+      - ./logs/haproxy:/logs/haproxy:ro
     environment:
       - NODE_ENV=production
       - DB_HOST=db
@@ -106,6 +108,7 @@ services:
       - haproxy-network
     volumes:
       - ./modsecurity/logs:/var/log/modsecurity
+      - ./modsecurity/crs:/etc/modsecurity/owasp-modsecurity-crs
     environment:
       - MODSEC_RULE_ENGINE=On
       - MODSEC_AUDIT_ENGINE=RelevantOnly

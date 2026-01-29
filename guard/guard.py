@@ -197,21 +197,42 @@ def process_line(line):
             total_critical = 0
             
             for item in ip_history[ip]:
-                unique_codes.add(item['code'])
+                code = item['code'].strip()
+                unique_codes.add(code)
                 path = item['path']
                 paths_count[path] = paths_count.get(path, 0) + 1
                 if item.get('critical'): total_critical += 1
             
-            code_summary = ", ".join(list(unique_codes))
+            # Smart Reason Generation
+            reasons = []
+            
+            # 1. Check for Rate Limiting
+            if '429' in unique_codes:
+                reasons.append("Aşırı İstek (Rate Limit)")
+            
+            # 2. Check for Critical Paths
+            if total_critical > 0:
+                reasons.append("Yönetici Paneli/Hassas Dosya Taraması")
+            
+            # 3. Check for 403 (WAF or Access Denied)
+            elif '403' in unique_codes:
+                reasons.append("WAF/Erişim Engeli")
+                
+            # 4. Check for 404 (Scanning)
+            elif '404' in unique_codes:
+                reasons.append("Bot Taraması (Geçersiz Dosyalar)")
+            
+            # Combine main reason
+            main_reason = " + ".join(reasons) if reasons else "Şüpheli Aktivite"
+            
+            # Add details
             top_paths = sorted(paths_count.items(), key=lambda x: x[1], reverse=True)[:3]
             path_summary = ", ".join([f"{p}" for p, count in top_paths])
             
-            if total_critical > 0:
-                reason = f"KRİTİK SALDIRI ENGELLEDİ! ({code_summary}) | Yol: {path_summary}"
-            else:
-                reason = f"{len(ip_history[ip])} hata ({code_summary}) | Örn: {path_summary}"
+            # Final formatted message
+            full_reason = f"{main_reason} - Hedefler: {path_summary}"
             
-            ban_ip(ip, reason)
+            ban_ip(ip, full_reason)
             ip_history[ip].clear() 
 
 def tail_file(filename):

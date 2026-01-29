@@ -321,13 +321,13 @@
                             </div>
                         </div>
                         <div class="col-md-3">
-                            <div class="stat-card">
+                            <div class="stat-card" style="cursor: pointer;" onclick="showTrafficLogs()">
                                 <div>
                                     <div class="stat-value text-info" id="stat-uptime">-</div>
-                                    <div class="stat-label">Uptime</div>
+                                    <div class="stat-label">Toplam İstek</div>
                                 </div>
                                 <div class="stat-icon bg-info bg-opacity-25 text-info">
-                                    <i class="bi bi-clock"></i>
+                                    <i class="bi bi-bar-chart-fill"></i>
                                 </div>
                             </div>
                         </div>
@@ -507,46 +507,89 @@
                     <div class="row g-3">
                         <div class="col-12">
                             <div class="card border-warning border-opacity-25">
-                                <div
-                                    class="card-header bg-warning bg-opacity-10 d-flex justify-content-between align-items-center">
-                                    <span class="fw-bold text-warning"><i class="bi bi-shield-exclamation me-2"></i> WAF
-                                        Kuralları (ModSecurity)</span>
-                                    <div>
-                                        <button class="btn btn-sm btn-outline-warning me-2" onclick="loadWafRules()">
-                                            <i class="bi bi-arrow-clockwise"></i> Yenile
-                                        </button>
-                                        <button class="btn btn-sm btn-warning" onclick="showAddWafRuleModal()">
-                                            <i class="bi bi-plus-lg"></i> Yeni Kural
+                                <div class="card-header bg-warning bg-opacity-10">
+                                    <div class="d-flex justify-content-between align-items-center mb-3">
+                                        <span class="fw-bold text-warning"><i class="bi bi-shield-exclamation me-2"></i>
+                                            WAF Yönetimi</span>
+                                        <button class="btn btn-sm btn-outline-success" onclick="reloadWaf()">
+                                            <i class="bi bi-arrow-repeat"></i> SPOA Yeniden Başlat
                                         </button>
                                     </div>
+                                    <ul class="nav nav-tabs card-header-tabs">
+                                        <li class="nav-item">
+                                            <a class="nav-link active text-warning" id="tab-custom-rules"
+                                                href="javascript:void(0)" onclick="switchWafTab('custom')">Özel
+                                                Kurallar</a>
+                                        </li>
+                                        <li class="nav-item">
+                                            <a class="nav-link text-muted" id="tab-owasp-crs" href="javascript:void(0)"
+                                                onclick="switchWafTab('owasp')">OWASP CRS</a>
+                                        </li>
+                                    </ul>
                                 </div>
                                 <div class="card-body p-0">
-                                    <div class="table-responsive">
-                                        <table class="table table-hover align-middle mb-0">
-                                            <thead class="bg-light bg-opacity-10">
-                                                <tr>
-                                                    <th class="ps-4">Dosya Adı</th>
-                                                    <th style="width: 120px;">Kural Sayısı</th>
-                                                    <th style="width: 100px;">Boyut</th>
-                                                    <th style="width: 180px;">Son Değişiklik</th>
-                                                    <th class="text-end pe-4" style="width: 120px;">İşlem</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody id="waf-rules-body">
-                                                <tr>
-                                                    <td colspan="5" class="text-center py-4">Yükleniyor...</td>
-                                                </tr>
-                                            </tbody>
-                                        </table>
+                                    <!-- Custom Rules Pane -->
+                                    <div id="pane-custom-rules">
+                                        <div
+                                            class="d-flex justify-content-end p-2 border-bottom border-warning border-opacity-25 bg-warning bg-opacity-10">
+                                            <button class="btn btn-sm btn-outline-warning me-2"
+                                                onclick="loadWafRules()">
+                                                <i class="bi bi-arrow-clockwise"></i> Yenile
+                                            </button>
+                                            <button class="btn btn-sm btn-warning" onclick="showAddWafRuleModal()">
+                                                <i class="bi bi-plus-lg"></i> Yeni Kural
+                                            </button>
+                                        </div>
+                                        <div class="table-responsive">
+                                            <table class="table table-hover align-middle mb-0">
+                                                <thead class="bg-light bg-opacity-10">
+                                                    <tr>
+                                                        <th class="ps-4">Dosya Adı</th>
+                                                        <th style="width: 120px;">Kural Sayısı</th>
+                                                        <th style="width: 100px;">Boyut</th>
+                                                        <th style="width: 180px;">Son Değişiklik</th>
+                                                        <th class="text-end pe-4" style="width: 120px;">İşlem</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="waf-rules-body">
+                                                    <tr>
+                                                        <td colspan="5" class="text-center py-4">Yükleniyor...</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+
+                                    <!-- OWASP CRS Pane -->
+                                    <div id="pane-owasp-crs" style="display: none;">
+                                        <div
+                                            class="d-flex justify-content-end p-2 border-bottom border-warning border-opacity-25 bg-warning bg-opacity-10">
+                                            <button class="btn btn-sm btn-outline-warning" onclick="loadCrsRules()">
+                                                <i class="bi bi-arrow-clockwise"></i> Yenile
+                                            </button>
+                                        </div>
+                                        <div class="table-responsive">
+                                            <table class="table table-hover align-middle mb-0">
+                                                <thead class="bg-light bg-opacity-10">
+                                                    <tr>
+                                                        <th class="ps-4">Dosya Adı</th>
+                                                        <th style="width: 100px;">Durum</th>
+                                                        <th style="width: 100px;">Boyut</th>
+                                                        <th class="text-end pe-4" style="width: 180px;">İşlem</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="waf-crs-body">
+                                                    <tr>
+                                                        <td colspan="4" class="text-center py-4">Yükleniyor...</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
                                     </div>
                                 </div>
-                                <div
-                                    class="card-footer bg-transparent border-top border-secondary border-opacity-25 d-flex justify-content-between align-items-center py-2">
+                                <div class="card-footer bg-transparent border-top border-secondary border-opacity-25">
                                     <small class="text-muted"><i class="bi bi-info-circle me-1"></i> Değişikliklerin
                                         etkili olması için SPOA'yı yeniden başlatın</small>
-                                    <button class="btn btn-sm btn-outline-success" onclick="reloadWaf()">
-                                        <i class="bi bi-arrow-repeat"></i> SPOA Yeniden Başlat
-                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -1489,11 +1532,95 @@
     </div>
 
 
+    <!-- Edit CRS Rule Modal -->
+    <div class="modal fade" id="editCrsModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">CRS Kuralı Düzenle</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="editCrsForm">
+                        <input type="hidden" name="filename" id="crsEditFilename">
+                        <div class="mb-3">
+                            <label class="form-label">Dosya Adı</label>
+                            <input type="text" class="form-control" id="crsEditFilenameDisplay" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">İçerik</label>
+                            <textarea class="form-control font-monospace" name="content" id="crsEditContent" rows="15"
+                                spellcheck="false"></textarea>
+                            <small class="form-text text-muted">Dikkat: Yanlış sözdizimi HAProxy/SPOA servisinin
+                                başlamasını engelleyebilir.</small>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
+                    <button type="button" class="btn btn-primary" onclick="saveCrsRule()">Kaydet</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Traffic Logs Modal -->
+    <div class="modal fade" id="trafficLogsModal" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content bg-dark text-light border-secondary border-opacity-25">
+                <div class="modal-header d-flex flex-wrap align-items-center gap-3">
+                    <h5 class="modal-title mb-0"><i class="bi bi-list-columns me-2"></i>Trafik Logları</h5>
+
+                    <div class="flex-grow-1">
+                        <div class="input-group input-group-sm">
+                            <span
+                                class="input-group-text bg-transparent border-secondary border-opacity-25 text-muted"><i
+                                    class="bi bi-search"></i></span>
+                            <input type="text" id="trafficLogSearch"
+                                class="form-control bg-transparent border-secondary border-opacity-25 text-light"
+                                placeholder="IP veya URL ara...">
+                        </div>
+                    </div>
+
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="autoRefreshLogs" checked>
+                        <label class="form-check-label small text-muted" for="autoRefreshLogs">Canlı Akış</label>
+                    </div>
+
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover table-sm mb-0 font-monospace" style="font-size: 0.85rem;">
+                            <thead class="bg-light bg-opacity-10 sticky-top">
+                                <tr>
+                                    <th class="ps-3">Zaman</th>
+                                    <th>IP Adresi</th>
+                                    <th>İstek (Method/URL)</th>
+                                    <th class="text-end pe-3">Detay</th>
+                                </tr>
+                            </thead>
+                            <tbody id="traffic-logs-body">
+                                <tr>
+                                    <td colspan="4" class="text-center py-4">Yükleniyor...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer justify-content-between">
+                    <small class="text-muted">Son 50 istek gösteriliyor.</small>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Kapat</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
-    <script src="app.js?v=2"></script>
+    <script src="app.js?v=9"></script>
 </body>
 
 </html>

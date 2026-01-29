@@ -25,6 +25,7 @@ const jwt = require('jsonwebtoken');
 const http = require('http');
 const WebSocket = require('ws');
 const HEDNSManager = require('./he-dns-manager');
+const CRSManager = require('./crs-manager');
 const app = express();
 
 const PORT = process.env.PORT || 3000;
@@ -74,6 +75,7 @@ pool.on('error', (err, client) => {
 
 // SSL Manager
 const sslManager = new SSLManager();
+const crsManager = new CRSManager();
 
 // Initialize database
 async function initDatabase() {
@@ -2113,6 +2115,27 @@ function runHAProxyCommand(command) {
 let cachedStats = null;
 let lastCacheUpdate = 0;
 
+// Persistent Stats Logic
+const STATS_FILE = '/app/data/stats_state.json';
+let statsState = { cumulative: 0, lastRaw: 0 };
+
+// Load stats from disk on startup
+try {
+  if (fs.existsSync(STATS_FILE)) {
+    const raw = fs.readFileSync(STATS_FILE, 'utf-8');
+    statsState = JSON.parse(raw);
+    console.log('Loaded persistent stats:', statsState);
+  }
+} catch (e) {
+  console.error('Failed to load stats file:', e);
+}
+
+function saveStatsState() {
+  try {
+    fs.writeFileSync(STATS_FILE, JSON.stringify(statsState));
+  } catch (e) { /* ignore */ }
+}
+
 // Poll stats every 1000ms automatically
 setInterval(async () => {
   try {
@@ -2120,6 +2143,48 @@ setInterval(async () => {
     if (data && data.length > 100) {
       cachedStats = data;
       lastCacheUpdate = Date.now();
+
+      // Parse for persistent tracking
+      const lines = data.trim().split('\n');
+      if (lines.length > 1) {
+        // Remove '# ' from header
+        const headerLine = lines[0].startsWith('# ') ? lines[0].substring(2) : lines[0];
+        const headers = headerLine.split(',');
+        const svnameIdx = headers.indexOf('svname');
+        const reqTotIdx = headers.indexOf('req_tot');
+
+        if (svnameIdx !== -1 && reqTotIdx !== -1) {
+          let currentSessionTotal = 0;
+          for (let i = 1; i < lines.length; i++) {
+            const cols = lines[i].split(',');
+            // Match logic in app.js: sum FRONTEND and BACKEND
+            if (cols[svnameIdx] === 'FRONTEND' || cols[svnameIdx] === 'BACKEND') {
+              currentSessionTotal += (parseInt(cols[reqTotIdx]) || 0);
+            }
+          }
+
+          // Calculate Delta
+          let delta = currentSessionTotal - statsState.lastRaw;
+
+          // Detect Restart (current < last)
+          if (delta < 0) {
+            // Restart happened. Assume delta is just current (since it reset to 0)
+            delta = currentSessionTotal;
+          }
+
+          // Only update if traffic occurred
+          if (delta > 0) {
+            statsState.cumulative += delta;
+            statsState.lastRaw = currentSessionTotal;
+            saveStatsState();
+          } else {
+            // Even if no traffic, update lastRaw to match current (e.g. if it didn't change)
+            // But if delta is 0, lastRaw is already equal to currentSessionTotal. 
+            // If delta < 0 (restart), we need to update lastRaw.
+            statsState.lastRaw = currentSessionTotal;
+          }
+        }
+      }
     }
   } catch (e) {
     // Silent fail
@@ -2127,18 +2192,21 @@ setInterval(async () => {
 }, 1000);
 
 app.get('/api/ha_stats', requireAuth, async (req, res) => {
-  // Return cached data immediately (0 latency)
+  // Return cached data immediately
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('X-Stats-Age', Date.now() - lastCacheUpdate); // Monitoring header
+  res.setHeader('X-Cumulative-Req-Tot', statsState.cumulative); // Persistent Total
+
   if (cachedStats) {
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('X-Stats-Age', Date.now() - lastCacheUpdate); // Monitoring header
     return res.send(cachedStats);
   }
 
-  // Fallback: If cache is empty (cold start), try fetch once
+  // Fallback: If cache is empty
   try {
     const statsCsv = await runHAProxyCommand('show stat');
     cachedStats = statsCsv; // Update cache
-    res.setHeader('Content-Type', 'text/csv');
+
+    // Note: We don't process persistent stats here for simplicity, the interval will catch it in max 1s
     res.send(statsCsv);
   } catch (error) {
     console.error('Stats Socket Error:', error.message);
@@ -2401,6 +2469,131 @@ startServer().then(() => {
       } else {
         res.status(500).json({ error: err.message });
       }
+    }
+  });
+
+  // --- Log Access Endpoint ---
+  app.get('/api/logs/access', requireAuth, async (req, res) => {
+    const limit = parseInt(req.query.limit) || 50;
+    const search = req.query.search || '';
+    const LOG_FILE = '/logs/haproxy/haproxy.log';
+
+    try {
+      const { exec } = require('child_process');
+
+      let cmd = `tail -n ${limit} ${LOG_FILE}`;
+      if (search) {
+        if (!/^[a-zA-Z0-9.:-]+$/.test(search)) return res.status(400).json({ error: 'Invalid search' });
+        cmd = `grep "${search}" ${LOG_FILE} | tail -n ${limit}`;
+      }
+
+      exec(cmd, { maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+        if (error && error.code !== 1) {
+          console.error('Log read error:', error);
+          return res.status(500).json({ error: 'Failed to read logs' });
+        }
+
+        // Parse raw syslog lines into JSON objects
+        // Format example: <134>Jan 29 13:13:38 haproxy[8]: 192.168.1.1:1234 ...
+        const lines = stdout.trim().split('\n').reverse(); // Newest first
+        const logs = lines.map(line => {
+          // Simple parsing logic
+          const parts = line.split(']: ');
+          if (parts.length < 2) return { raw: line };
+
+          const header = parts[0];
+          const body = parts.slice(1).join(']: '); // Rejoin rest
+
+          // Extract timestamp from header (Jan 29 13:13:38)
+          const timeMatch = header.match(/>(\w{3}\s+\d+\s+\d{2}:\d{2}:\d{2})/);
+          const timestamp = timeMatch ? timeMatch[1] : '';
+
+          // Body: ip:port [date] frontend backend ...
+          // 195.87.80.179:40622 [29/Jan/2026:13:13:38.359] ...
+          const ipMatch = body.match(/^([\d.]+):/);
+          const ip = ipMatch ? ipMatch[1] : '-';
+
+          // Request: "GET /foo HTTP/1.1"
+          const reqMatch = body.match(/"([^"]+)"/);
+          const request = reqMatch ? reqMatch[1] : '-';
+
+          // Status code: usually after backend info
+          // regex is tricky for all cases, let's keep it simple or raw
+          // A common log format match:
+          // IP:PORT [DATE] FRONT BACKEND ... STATUS BYTES ... "REQUEST"
+
+          return {
+            raw: line,
+            timestamp,
+            ip,
+            request
+          };
+        });
+
+        res.json({ logs });
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- OWASP CRS Management Endpoints ---
+
+  app.get('/api/waf/crs', requireAuth, async (req, res) => {
+    try {
+      const rules = await crsManager.listRules();
+      res.json(rules);
+    } catch (err) {
+      console.error('Error listing CRS rules:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/waf/crs/:filename', requireAuth, async (req, res) => {
+    try {
+      const content = await crsManager.getRuleContent(req.params.filename);
+      res.send(content);
+    } catch (err) {
+      console.error(`Error reading CRS rule ${req.params.filename}:`, err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/waf/crs/:filename', requireAuth, async (req, res) => {
+    try {
+      const { content } = req.body;
+      if (typeof content !== 'string') {
+        return res.status(400).json({ error: 'Content is required' });
+      }
+      await crsManager.saveRuleContent(req.params.filename, content);
+      res.json({ success: true });
+    } catch (err) {
+      console.error(`Error saving CRS rule ${req.params.filename}:`, err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/waf/crs/:filename/toggle', requireAuth, async (req, res) => {
+    try {
+      const { enable } = req.body;
+      if (typeof enable !== 'boolean') {
+        return res.status(400).json({ error: 'Enable status is required' });
+      }
+      const result = await crsManager.toggleRule(req.params.filename, enable);
+      res.json(result);
+    } catch (err) {
+      console.error(`Error toggling CRS rule ${req.params.filename}:`, err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/waf/reload-spoa', requireAuth, async (req, res) => {
+    try {
+      await crsManager.reloadSPOA();
+      res.json({ success: true });
+    } catch (err) {
+      console.error('Error reloading SPOA:', err);
+      res.status(500).json({ error: err.message });
     }
   });
 

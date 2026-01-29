@@ -21,7 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       const { token } = await res.json();
       localStorage.setItem('token', token);
-      window.location.replace('index.html');
+      window.location.href = 'index.html';
     } catch (err) {
       errorBox.textContent = err.message || 'Bağlantı hatası';
       errorBox.classList.remove('d-none');

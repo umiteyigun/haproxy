@@ -33,16 +33,15 @@
         }
     </style>
     <script defer src="login.js?v=2"></script>
+    <!-- 
     <script>
-        // Prevent FOUC if already logged in
-        document.addEventListener('DOMContentLoaded', () => {
-            const token = localStorage.getItem('token');
-            if (token) window.location.replace('index.html');
-        });
-    </script>
-    <noscript>
-        <meta http-equiv="refresh" content="0; url=index.html">
-    </noscript>
+        // Prevent FOUC if already logged in - DISABLED TO FIX LOOP
+        // document.addEventListener('DOMContentLoaded', () => {
+        //     const token = localStorage.getItem('token');
+        //     if (token) window.location.replace('index.html');
+        // });
+    </script> 
+    -->
 
 </head>
 

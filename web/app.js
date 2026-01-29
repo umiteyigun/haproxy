@@ -1,6 +1,7 @@
 // API base URL - relative path via HAProxy
 const API_BASE = '/api';
 const AUTH_BASE = '';
+console.log('App.js loaded v3');
 let authToken = localStorage.getItem('token') || '';
 
 // Helper function to convert UTC time to Turkey time (UTC+3) and format message
@@ -185,9 +186,11 @@ async function loadStats() {
             headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
         });
         if (!response.ok) return;
+
+        const persistentTotal = parseInt(response.headers.get('X-Cumulative-Req-Tot') || 0);
         const csvText = await response.text();
         const stats = parseStatsCSV(csvText);
-        updateDashboard(stats);
+        updateDashboard(stats, persistentTotal);
     } catch (e) {
         console.error("Stats load failed", e);
     }
@@ -210,7 +213,7 @@ function parseStatsCSV(csv) {
     return data;
 }
 
-function updateDashboard(statsData) {
+function updateDashboard(statsData, persistentTotal = 0) {
     // Calculate global stats (sum of all frontends/backends)
     let activeConns = 0;
     let reqRate = 0;
@@ -218,6 +221,7 @@ function updateDashboard(statsData) {
     let errors = 0;
     let trafficIn = 0;
     let trafficOut = 0;
+    let totalReq = 0;
 
     // Filter relevant rows (Frontend/Backend totals)
     statsData.forEach(s => {
@@ -230,13 +234,24 @@ function updateDashboard(statsData) {
             // bin: bytes in, bout: bytes out
             trafficIn += parseInt(s.bin || 0);
             trafficOut += parseInt(s.bout || 0);
+            // req_tot: Total requests - used only if persistentTotal is 0 (fallback) or for logic
+            totalReq += parseInt(s.req_tot || 0);
         }
     });
+
+    // Use persistent total if available and valid
+    if (persistentTotal > 0) {
+        totalReq = persistentTotal;
+    }
 
     // Protocol breakdown (mock approximation based on frontend names: http_frontend vs https_frontend)
     // Real HAProxy stats distinguish by proxy name (pxname).
     let httpCount = 0;
     let httpsCount = 0;
+
+    // We can't really approximate protocol breakdown persistence easily without more complex tracking.
+    // So we'll let this be "session based" or just scale it relative to totalReq?
+    // Let's just keep session based for breakdown pie chart, but use Persistent for the Big Number.
     statsData.forEach(s => {
         if (s.svname === 'FRONTEND') {
             if (s.pxname.includes('http') && !s.pxname.includes('https')) httpCount += parseInt(s.req_tot || 0);
@@ -245,17 +260,23 @@ function updateDashboard(statsData) {
     });
 
     // Update DOM
-    document.getElementById('stat-active-conns').textContent = activeConns;
-    document.getElementById('stat-req-rate').textContent = reqRate + " /s";
-    document.getElementById('stat-errors').textContent = errors;
+    // Update DOM
+    const activeConnsEl = document.getElementById('stat-active-conns');
+    if (activeConnsEl) activeConnsEl.innerText = activeConns.toLocaleString();
 
-    // Uptime is usually in first row system stats, but CSV might not have it.
-    // We'll mock uptime or calculate if pid/start time available.
-    // For now simple placeholder update:
-    document.getElementById('stat-uptime').textContent = formatUptime(parseInt(statsData[0]?.Uptime_sec || 0)); // Not in CSV std, but let's see. 
-    // Actually HAProxy stats CSV doesn't have Uptime. We'd need 'show info'.
-    // Let's use 'pid' existence as "Online".
-    document.getElementById('stat-uptime').textContent = "Online";
+    const reqRateEl = document.getElementById('stat-req-rate');
+    if (reqRateEl) reqRateEl.innerText = reqRate.toLocaleString();
+
+    const errorsEl = document.getElementById('stat-errors');
+    if (errorsEl) errorsEl.innerText = errors.toLocaleString();
+
+    // We'll replace the Uptime/Online placeholder with "Total Requests"
+    const totalReqEl = document.getElementById('stat-uptime');
+    if (totalReqEl) totalReqEl.textContent = new Intl.NumberFormat('tr-TR').format(totalReq);
+
+    // Also try to update the label if possible, though best done in HTML.
+    const uptimeLabel = document.getElementById('stat-uptime').parentElement.querySelector('.stat-label');
+    if (uptimeLabel) uptimeLabel.textContent = "Toplam İstek (Kümülatif)";
 
     document.getElementById('last-updated').textContent = "Son Güncelleme: " + new Date().toLocaleTimeString();
 
@@ -321,7 +342,9 @@ async function loadBans() {
                         ${ban.date || '-'}
                     </td>
                     <td>
-                        <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25" title="${ban.reason || 'Bilinmiyor'}">${ban.reason || 'Şüpheli aktivite'}</span>
+                        <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 text-wrap text-start" style="line-height: 1.4; white-space: normal;">
+                            ${ban.reason || 'Şüpheli aktivite'}
+                        </span>
                     </td>
                     <td class="text-end pe-4">
                         <button class="btn btn-sm btn-outline-success" onclick="unbanIp('${ban.ip}')">
@@ -332,6 +355,10 @@ async function loadBans() {
             `;
             tbody.innerHTML += row;
         });
+
+        // Initialize Bootstrap tooltips
+        const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
+        const tooltipList = [...tooltipTriggerList].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
 
     } catch (e) {
         tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">Hata: ${e.message}</td></tr>`;
@@ -3722,4 +3749,307 @@ document.addEventListener('DOMContentLoaded', () => {
     setAuthUI();
     // Default to stats section (which handles auth check)
     showSection('stats');
+});
+
+/* --- WAF CRS Management --- */
+function switchWafTab(tab) {
+    const paneCustom = document.getElementById('pane-custom-rules');
+    const paneOwasp = document.getElementById('pane-owasp-crs');
+    const tabCustom = document.getElementById('tab-custom-rules');
+    const tabOwasp = document.getElementById('tab-owasp-crs');
+
+    if (tab === 'custom') {
+        paneCustom.style.display = 'block';
+        paneOwasp.style.display = 'none';
+        tabCustom.classList.add('active');
+        tabCustom.classList.remove('text-muted');
+        tabOwasp.classList.remove('active');
+        tabOwasp.classList.add('text-muted');
+    } else {
+        paneCustom.style.display = 'none';
+        paneOwasp.style.display = 'block';
+        tabCustom.classList.remove('active');
+        tabCustom.classList.add('text-muted');
+        tabOwasp.classList.add('active');
+        tabOwasp.classList.remove('text-muted');
+        loadCrsRules();
+    }
+}
+
+async function loadCrsRules() {
+    const tbody = document.getElementById('waf-crs-body');
+    tbody.innerHTML = '<tr><td colspan="4" class=\"text-center\">Yükleniyor...</td></tr>';
+
+    try {
+        const response = await fetch(`${API_BASE}/waf/crs`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+
+        if (!response.ok) throw new Error('Failed to load rules');
+
+        const rules = await response.json();
+        tbody.innerHTML = '';
+
+        if (rules.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class=\"text-center\">Kural bulunamadı</td></tr>';
+            return;
+        }
+
+        rules.forEach(rule => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="font-monospace">${rule.filename}</td>
+                <td>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" 
+                            id="switch-${rule.name}" 
+                            ${rule.enabled ? 'checked' : ''} 
+                            onchange="toggleCrsRule('${rule.filename}', this.checked)">
+                        <label class="form-check-label" for="switch-${rule.name}">
+                            ${rule.enabled ? 'Aktif' : 'Pasif'}
+                        </label>
+                    </div>
+                </td>
+                <td>${(rule.size / 1024).toFixed(1)} KB</td>
+                <td class="text-end">
+                    <button class="btn btn-sm btn-outline-primary" onclick="editCrsRule('${rule.filename}')">
+                        <i class="bi bi-pencil"></i> Düzenle
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    } catch (error) {
+        console.error('Error loading CRS rules:', error);
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center text-danger">Hata: ${error.message}</td></tr>`;
+    }
+}
+
+async function toggleCrsRule(filename, enable) {
+    try {
+        const response = await fetch(`${API_BASE}/waf/crs/${filename}/toggle`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({ enable })
+        });
+
+        if (!response.ok) throw new Error('Failed to toggle rule');
+
+        await loadCrsRules();
+    } catch (error) {
+        console.error('Error toggling rule:', error);
+        alert('Kural durumu değiştirilemedi: ' + error.message);
+        loadCrsRules();
+    }
+}
+
+async function editCrsRule(filename) {
+    try {
+        const response = await fetch(`${API_BASE}/waf/crs/${filename}`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+
+        if (!response.ok) throw new Error('Failed to load content');
+
+        const content = await response.text();
+        document.getElementById('crsEditFilename').value = filename;
+        document.getElementById('crsEditFilenameDisplay').value = filename;
+        document.getElementById('crsEditContent').value = content;
+
+        const modal = new bootstrap.Modal(document.getElementById('editCrsModal'));
+        modal.show();
+    } catch (error) {
+        console.error('Error loading rule content:', error);
+        alert('İçerik yüklenemedi: ' + error.message);
+    }
+}
+
+async function saveCrsRule() {
+    const filename = document.getElementById('crsEditFilename').value;
+    const content = document.getElementById('crsEditContent').value;
+
+    try {
+        const response = await fetch(`${API_BASE}/waf/crs/${filename}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({ content })
+        });
+
+        if (!response.ok) throw new Error('Failed to save content');
+
+        const modal = bootstrap.Modal.getInstance(document.getElementById('editCrsModal'));
+        modal.hide();
+
+        loadCrsRules();
+        alert('Kural kaydedildi. Değişikliklerin etkili olması için SPOA\'yı yeniden başlatmayı unutmayın.');
+    } catch (error) {
+        console.error('Error saving rule:', error);
+        alert('Kaydedilemedi: ' + error.message);
+    }
+}
+
+/* --- Traffic Logs --- */
+let trafficLogInterval = null;
+let trafficLogSearchTerm = '';
+// Global storage for current logs to allow client-side filtering
+let currentLogs = [];
+
+async function showTrafficLogs() {
+    const modalEl = document.getElementById('trafficLogsModal');
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    modal.show();
+
+    // Bind events - wait for modal DOM to be ready
+    setTimeout(() => {
+        const searchInput = document.getElementById('trafficLogSearch');
+        const autoRefresh = document.getElementById('autoRefreshLogs');
+
+        if (searchInput) {
+            // Unbind old events
+            searchInput.onkeyup = null;
+            searchInput.oninput = (e) => {
+                trafficLogSearchTerm = e.target.value.toLowerCase().trim();
+                renderTrafficLogs();
+            };
+            searchInput.focus();
+        }
+
+        if (autoRefresh) {
+            autoRefresh.onchange = (e) => {
+                if (e.target.checked) startLogInterval();
+                else stopLogInterval();
+            };
+            autoRefresh.checked = true;
+        }
+    }, 200);
+
+    trafficLogSearchTerm = '';
+    const searchInput = document.getElementById('trafficLogSearch');
+    if (searchInput) searchInput.value = '';
+
+    // Initial fetch
+    await loadTrafficLogs();
+    startLogInterval();
+
+    modalEl.addEventListener('hidden.bs.modal', stopLogInterval, { once: true });
+}
+
+function startLogInterval() {
+    stopLogInterval();
+    // 2 seconds interval
+    trafficLogInterval = setInterval(loadTrafficLogs, 2000);
+}
+
+function stopLogInterval() {
+    if (trafficLogInterval) {
+        clearInterval(trafficLogInterval);
+        trafficLogInterval = null;
+    }
+}
+
+async function loadTrafficLogs() {
+    try {
+        // Fetch last 100 logs always
+        const response = await fetch(`${API_BASE}/logs/access?limit=100&_t=${Date.now()}`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+
+        if (!response.ok) throw new Error('Log fetch failed');
+
+        const data = await response.json();
+        currentLogs = data.logs || [];
+
+        renderTrafficLogs();
+
+    } catch (e) {
+        console.error("Traffic log error:", e);
+        const tbody = document.getElementById('traffic-logs-body');
+        if (tbody && tbody.innerHTML.includes('Yükleniyor')) {
+            tbody.innerHTML = `<tr><td colspan="4" class="text-center text-danger">Hata: ${e.message}</td></tr>`;
+        }
+    }
+}
+
+function renderTrafficLogs() {
+    const tbody = document.getElementById('traffic-logs-body');
+    if (!tbody) return;
+
+    let displayLogs = currentLogs;
+
+    // Filter locally
+    if (trafficLogSearchTerm) {
+        displayLogs = currentLogs.filter(log => {
+            const raw = (log.raw || '').toLowerCase();
+            return raw.includes(trafficLogSearchTerm);
+        });
+    }
+
+    if (displayLogs.length === 0) {
+        if (currentLogs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Sunucudan log gelmedi.</td></tr>';
+        } else {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Arama kriterine uygun kayıt yok.</td></tr>';
+        }
+        return;
+    }
+
+    const html = displayLogs.map(log => {
+        const time = log.timestamp || '-';
+        const ip = log.ip || '-';
+        const req = log.request || (log.raw ? 'Raw log' : '-');
+
+        const methodMatch = req.match(/^([A-Z]+)\s/);
+        const method = methodMatch ? methodMatch[1] : '';
+        let methodBadge = '';
+        if (method === 'GET') methodBadge = '<span class="badge bg-success bg-opacity-10 text-success me-2">GET</span>';
+        else if (method === 'POST') methodBadge = '<span class="badge bg-warning bg-opacity-10 text-warning me-2">POST</span>';
+        else if (method) methodBadge = `<span class="badge bg-secondary me-2">${method}</span>`;
+
+        const cleanReq = req.replace(/^[A-Z]+\s/, '').replace(/ HTTP\/[0-9.]+$/, '');
+        const safeRaw = (log.raw || '').replace(/`/g, '\\`').replace(/\\$/g, '\\$').replace(/"/g, '&quot;');
+
+        return `
+            <tr>
+                <td class="ps-3 text-muted font-monospace" style="width: 150px; font-size: 0.8rem;">${time}</td>
+                <td class="text-info fw-bold font-monospace" style="width: 140px;">${ip}</td>
+                <td class="text-truncate" style="max-width: 450px;">
+                    ${methodBadge}
+                    <span class="font-monospace" title="${cleanReq.replace(/"/g, '&quot;')}">${cleanReq.substring(0, 80)}${cleanReq.length > 80 ? '...' : ''}</span>
+                </td>
+                <td class="text-end pe-3">
+                     <button class="btn btn-sm btn-link text-muted p-0" onclick="alert(\`Raw Log:\\n${safeRaw}\`)">
+                        <i class="bi bi-info-circle"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    tbody.innerHTML = html;
+}
+
+// Initialize 
+document.addEventListener('DOMContentLoaded', () => {
+    // Check auth on load
+    setAuthUI();
+    const token = localStorage.getItem('token');
+
+    // Set active section based on hash or default to stats
+    const hash = window.location.hash.replace('#', '') || 'stats';
+
+    // If we have token, show the section
+    if (authToken) {
+        showSection(hash);
+    } else {
+        // If no token, maybe we are just landing.
+        // If user tries to access a section, showSection will handle redirect to login
+        // But for initial load, let's just update UI
+        console.log("No auth token found on init");
+    }
 });
