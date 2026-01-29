@@ -108,7 +108,7 @@ set txt_value ""
 
 while {1} {
     expect {
-        -re {Please deploy a DNS TXT record under the name:\s+([^\r\n]+)\s+with the following value:\s+([^\r\n]+)\s+} {
+        -re {Please deploy a DNS TXT record under the name:\s+(\S+)[\s\r\n]+with the following value:\s+(\S+)[\s\r\n]+} {
             set raw_name [string trim $expect_out(1,string)]
             set raw_value [string trim $expect_out(2,string)]
             if {[string match *. $raw_name]} {

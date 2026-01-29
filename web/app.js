@@ -1,9 +1,6 @@
-// API base URL - use localhost since web is accessed from browser
-const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
-  ? 'http://localhost:3000/api' 
-  : `http://${window.location.hostname}:3000/api`;
-
-const AUTH_BASE = API_BASE.replace('/api', '');
+// API base URL - relative path via HAProxy
+const API_BASE = '/api';
+const AUTH_BASE = '';
 let authToken = localStorage.getItem('token') || '';
 
 // Helper function to convert UTC time to Turkey time (UTC+3) and format message
@@ -11,7 +8,7 @@ function formatRetryAfterMessage(retryAfter) {
     if (!retryAfter) {
         return 'Lütfen 1 saat sonra tekrar deneyin.';
     }
-    
+
     try {
         // Parse UTC time from retryAfter string
         // Format: "2025-11-06 14:44:05 UTC" or "2025-11-06 14:44:05 UTC: see ..."
@@ -19,17 +16,17 @@ function formatRetryAfterMessage(retryAfter) {
         if (utcMatch) {
             const utcString = utcMatch[1] + ' UTC';
             const utcDate = new Date(utcString);
-            
+
             // Convert to Turkey time (UTC+3)
             const turkeyDate = new Date(utcDate.getTime() + (3 * 60 * 60 * 1000));
-            
+
             // Format dates
             const utcFormatted = utcDate.toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
             const turkeyFormatted = turkeyDate.toISOString().replace('T', ' ').substring(0, 19) + ' TR';
-            
+
             return `Tekrar deneme: ${utcFormatted} / ${turkeyFormatted}`;
         }
-        
+
         // If parsing fails, return original
         return `Tekrar deneme: ${retryAfter}`;
     } catch (error) {
@@ -62,16 +59,28 @@ function logout() {
 
 // Show section
 function showSection(section) {
-    if (!authToken) {
+    if (!authToken && section !== 'login') {
         showLoginModal();
         return;
     }
     document.querySelectorAll('.section').forEach(s => s.style.display = 'none');
     document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
-    
-    document.getElementById(`${section}-section`).style.display = 'block';
-    event.target.closest('.nav-link').classList.add('active');
-    
+
+    const sectionEl = document.getElementById(`${section}-section`);
+    if (sectionEl) sectionEl.style.display = 'block';
+
+    // Highlight sidebar
+    const link = document.querySelector(`a[onclick="showSection('${section}')"]`);
+    if (link) link.classList.add('active');
+
+    if (section === 'stats') {
+        initCharts();
+        loadStats();
+        startStatsInterval();
+    } else {
+        stopStatsInterval();
+    }
+
     if (section === 'ingress') {
         loadIngressRules();
     } else if (section === 'portforward') {
@@ -80,21 +89,602 @@ function showSection(section) {
         loadSSLCertificates();
     } else if (section === 'users') {
         loadMembers();
+    } else if (section === 'security') {
+        loadBans();
+        loadWhitelist();
+        loadWafRules();
     }
 }
+
+// --- Stats & Dashboard ---
+let statsInterval = null;
+let trafficChart = null;
+let protocolChart = null;
+let chartData = {
+    labels: [],
+    reqRate: [],
+    connRate: []
+};
+
+function initCharts() {
+    if (trafficChart || protocolChart) return;
+
+    // Traffic Chart (Line)
+    const ctxTraffic = document.getElementById('trafficChart').getContext('2d');
+    trafficChart = new Chart(ctxTraffic, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'İstek/sn',
+                data: [],
+                borderColor: '#10b981', // Emerald 500
+                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                tension: 0.4,
+                fill: true
+            }, {
+                label: 'Bağlantı/sn',
+                data: [],
+                borderColor: '#3b82f6', // Blue 500
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                tension: 0.4,
+                fill: true
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { labels: { color: '#94a3b8' } }
+            },
+            scales: {
+                x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
+                y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' }, beginAtZero: true }
+            },
+            animation: { duration: 0 }
+        }
+    });
+
+    // Protocol Chart (Doughnut)
+    const ctxProtocol = document.getElementById('protocolChart').getContext('2d');
+    protocolChart = new Chart(ctxProtocol, {
+        type: 'doughnut',
+        data: {
+            labels: ['HTTP', 'HTTPS (SSL)', 'TCP'],
+            datasets: [{
+                data: [0, 0, 0],
+                backgroundColor: ['#f59e0b', '#10b981', '#6366f1'],
+                borderWidth: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { labels: { color: '#94a3b8' }, position: 'bottom' }
+            }
+        }
+    });
+}
+
+function startStatsInterval() {
+    if (statsInterval) clearInterval(statsInterval);
+    statsInterval = setInterval(loadStats, 2000);
+}
+
+function stopStatsInterval() {
+    if (statsInterval) {
+        clearInterval(statsInterval);
+        statsInterval = null;
+    }
+}
+
+async function loadStats() {
+    try {
+        const response = await fetch(`${API_BASE}/ha_stats`, {
+            headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
+        });
+        if (!response.ok) return;
+        const csvText = await response.text();
+        const stats = parseStatsCSV(csvText);
+        updateDashboard(stats);
+    } catch (e) {
+        console.error("Stats load failed", e);
+    }
+}
+
+function parseStatsCSV(csv) {
+    const lines = csv.trim().split('\n');
+    // Remove '# ' from header if present
+    if (lines[0].startsWith('# ')) lines[0] = lines[0].substring(2);
+
+    const headers = lines[0].split(',');
+    const data = [];
+
+    for (let i = 1; i < lines.length; i++) {
+        const row = lines[i].split(',');
+        const obj = {};
+        headers.forEach((h, idx) => obj[h] = row[idx]);
+        data.push(obj);
+    }
+    return data;
+}
+
+function updateDashboard(statsData) {
+    // Calculate global stats (sum of all frontends/backends)
+    let activeConns = 0;
+    let reqRate = 0;
+    let connRate = 0;
+    let errors = 0;
+    let trafficIn = 0;
+    let trafficOut = 0;
+
+    // Filter relevant rows (Frontend/Backend totals)
+    statsData.forEach(s => {
+        if (s.svname === 'FRONTEND' || s.svname === 'BACKEND') {
+            // scur: active sessions, rate: sessions/sec, req_rate: requests/sec, ereq: request errors
+            activeConns += parseInt(s.scur || 0);
+            reqRate += parseInt(s.req_rate || 0);
+            connRate += parseInt(s.rate || 0);
+            errors += parseInt(s.ereq || 0) + parseInt(s.econ || 0);
+            // bin: bytes in, bout: bytes out
+            trafficIn += parseInt(s.bin || 0);
+            trafficOut += parseInt(s.bout || 0);
+        }
+    });
+
+    // Protocol breakdown (mock approximation based on frontend names: http_frontend vs https_frontend)
+    // Real HAProxy stats distinguish by proxy name (pxname).
+    let httpCount = 0;
+    let httpsCount = 0;
+    statsData.forEach(s => {
+        if (s.svname === 'FRONTEND') {
+            if (s.pxname.includes('http') && !s.pxname.includes('https')) httpCount += parseInt(s.req_tot || 0);
+            if (s.pxname.includes('https')) httpsCount += parseInt(s.req_tot || 0);
+        }
+    });
+
+    // Update DOM
+    document.getElementById('stat-active-conns').textContent = activeConns;
+    document.getElementById('stat-req-rate').textContent = reqRate + " /s";
+    document.getElementById('stat-errors').textContent = errors;
+
+    // Uptime is usually in first row system stats, but CSV might not have it.
+    // We'll mock uptime or calculate if pid/start time available.
+    // For now simple placeholder update:
+    document.getElementById('stat-uptime').textContent = formatUptime(parseInt(statsData[0]?.Uptime_sec || 0)); // Not in CSV std, but let's see. 
+    // Actually HAProxy stats CSV doesn't have Uptime. We'd need 'show info'.
+    // Let's use 'pid' existence as "Online".
+    document.getElementById('stat-uptime').textContent = "Online";
+
+    document.getElementById('last-updated').textContent = "Son Güncelleme: " + new Date().toLocaleTimeString();
+
+    // Update Charts
+    const now = new Date().toLocaleTimeString();
+
+    if (chartData.labels.length > 50) {
+        chartData.labels.shift();
+        chartData.reqRate.shift();
+        chartData.connRate.shift();
+    }
+    chartData.labels.push(now);
+    chartData.reqRate.push(reqRate);
+    chartData.connRate.push(connRate);
+
+    if (trafficChart) {
+        trafficChart.data.labels = chartData.labels;
+        trafficChart.data.datasets[0].data = chartData.reqRate;
+        trafficChart.data.datasets[1].data = chartData.connRate;
+        trafficChart.update();
+    }
+
+    if (protocolChart) {
+        // Just usingreq_tot ratio for demo
+        // protocolChart.data.datasets[0].data = [httpCount, httpsCount, 0];
+        // protocolChart.update();
+    }
+}
+
+function formatUptime(seconds) {
+    // Placeholder
+    return "Running";
+}
+
+// --- Security (Guard) ---
+async function loadBans() {
+    const tbody = document.getElementById('ban-list-body');
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4">Veri yükleniyor...</td></tr>';
+
+    try {
+        const response = await fetch(`${API_BASE}/security/bans`, {
+            headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
+        });
+        if (!response.ok) throw new Error('Yüklenemedi');
+
+        const data = await response.json();
+        const bans = data.bans || [];
+
+        if (bans.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted"><i class="bi bi-shield-check fs-2 d-block mb-2"></i>Aktif yasaklama bulunmuyor.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = "";
+        bans.forEach((ban, index) => {
+            const row = `
+                <tr>
+                    <td class="ps-4 fw-bold text-muted">#${index + 1}</td>
+                    <td>
+                        <span class="font-monospace bg-dark bg-opacity-50 px-2 py-1 rounded text-warning">${ban.ip}</span>
+                    </td>
+                    <td class="text-muted small">
+                        ${ban.date || '-'}
+                    </td>
+                    <td>
+                        <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25" title="${ban.reason || 'Bilinmiyor'}">${ban.reason || 'Şüpheli aktivite'}</span>
+                    </td>
+                    <td class="text-end pe-4">
+                        <button class="btn btn-sm btn-outline-success" onclick="unbanIp('${ban.ip}')">
+                            <i class="bi bi-unlock"></i> Kaldır
+                        </button>
+                    </td>
+                </tr>
+            `;
+            tbody.innerHTML += row;
+        });
+
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">Hata: ${e.message}</td></tr>`;
+    }
+}
+
+async function unbanIp(ip) {
+    if (!confirm(`${ip} adresinin banını kaldırmak istediğinize emin misiniz?`)) return;
+
+    try {
+        const response = await fetch(`${API_BASE}/security/unban`, {
+            method: 'POST',
+            body: JSON.stringify({ ip }),
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+
+        if (response.ok) {
+            alert("Ban kaldırıldı.");
+            loadBans();
+        } else {
+            alert("İşlem başarısız.");
+        }
+    } catch (e) {
+        alert("Hata: " + e.message);
+    }
+}
+
+function refreshBans() {
+    loadBans();
+}
+
+function showManualBanModal() {
+    const ip = prompt("Banlanacak IP Adresini Girin:");
+    if (ip) {
+        // TODO: Backend'e manuel ban ekleme de eklemek lazım.
+        // Şimdilik sadece unban yapabiliyoruz API üzerinden.
+        // Guard API POST /ban eklenebilir. 
+        alert("Manuel ban (Web UI) henüz aktif değil. Lütfen Konsol kullanın.");
+    }
+}
+
+// --- Whitelist Management ---
+async function loadWhitelist() {
+    const container = document.getElementById('whitelist-body');
+    if (!container) return;
+
+    container.innerHTML = '<li class="list-group-item bg-transparent text-center text-muted py-3">Yükleniyor...</li>';
+
+    try {
+        const response = await fetch(`${API_BASE}/security/whitelist`, {
+            headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
+        });
+        if (!response.ok) throw new Error('Yüklenemedi');
+
+        const data = await response.json();
+        const whitelist = data.whitelist || [];
+
+        if (whitelist.length === 0) {
+            container.innerHTML = '<li class="list-group-item bg-transparent text-center text-muted py-3"><i class="bi bi-list me-2"></i>Henüz IP eklenmemiş.</li>';
+            return;
+        }
+
+        container.innerHTML = whitelist.map(ip => `
+            <li class="list-group-item bg-transparent d-flex justify-content-between align-items-center">
+                <span class="font-monospace text-success"><i class="bi bi-check-circle me-2"></i>${ip}</span>
+                <button class="btn btn-sm btn-outline-danger" onclick="removeFromWhitelist('${ip}')" title="Kaldır">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </li>
+        `).join('');
+
+    } catch (e) {
+        container.innerHTML = `<li class="list-group-item bg-transparent text-center text-danger py-3">Hata: ${e.message}</li>`;
+    }
+}
+
+function showAddWhitelistModal() {
+    document.getElementById('whitelist-ip-input').value = '';
+    new window.bootstrap.Modal(document.getElementById('addWhitelistModal')).show();
+}
+
+async function confirmAddWhitelist() {
+    const ip = document.getElementById('whitelist-ip-input').value.trim();
+    if (!ip) {
+        alert('Lütfen bir IP adresi girin.');
+        return;
+    }
+
+    // Basic IP validation
+    const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+    if (!ipRegex.test(ip)) {
+        alert('Geçersiz IP adresi formatı. Örnek: 1.2.3.4');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/security/whitelist`, {
+            method: 'POST',
+            body: JSON.stringify({ ip }),
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+
+        if (response.ok) {
+            // Close modal
+            window.bootstrap.Modal.getInstance(document.getElementById('addWhitelistModal')).hide();
+            showAlert('IP adresi whitelist\'e eklendi: ' + ip, 'success');
+            loadWhitelist();
+        } else {
+            const err = await response.json();
+            alert('Hata: ' + (err.error || 'Bilinmeyen hata'));
+        }
+    } catch (e) {
+        alert('Hata: ' + e.message);
+    }
+}
+
+async function removeFromWhitelist(ip) {
+    if (!confirm(`${ip} adresini whitelist'ten kaldırmak istediğinize emin misiniz?`)) return;
+
+    try {
+        const response = await fetch(`${API_BASE}/security/unwhitelist`, {
+            method: 'POST',
+            body: JSON.stringify({ ip }),
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+
+        if (response.ok) {
+            showAlert('IP adresi whitelist\'ten kaldırıldı: ' + ip, 'warning');
+            loadWhitelist();
+        } else {
+            alert('İşlem başarısız.');
+        }
+    } catch (e) {
+        alert('Hata: ' + e.message);
+    }
+}
+
+// --- WAF Rules Management ---
+async function loadWafRules() {
+    const tbody = document.getElementById('waf-rules-body');
+    if (!tbody) return;
+
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4">Yükleniyor...</td></tr>';
+
+    try {
+        const response = await fetch(`${API_BASE}/waf/rules`, {
+            headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
+        });
+        if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.error || `HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        const rules = data.rules || [];
+
+        if (rules.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted"><i class="bi bi-file-earmark-x fs-2 d-block mb-2"></i>Henüz kural dosyası yok.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = rules.map(rule => {
+            const modified = new Date(rule.modified).toLocaleString('tr-TR');
+            const sizeKb = (rule.size / 1024).toFixed(1);
+            return `
+                <tr>
+                    <td class="ps-4">
+                        <span class="font-monospace text-warning"><i class="bi bi-file-earmark-code me-2"></i>${rule.name}</span>
+                    </td>
+                    <td>
+                        <span class="badge bg-info bg-opacity-10 text-info">${rule.ruleCount} kural</span>
+                    </td>
+                    <td class="text-muted small">${sizeKb} KB</td>
+                    <td class="text-muted small">${modified}</td>
+                    <td class="text-end pe-4">
+                        <button class="btn btn-sm btn-outline-warning" onclick="editWafRule('${rule.name}')">
+                            <i class="bi bi-pencil"></i> Düzenle
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-4">Hata: ${e.message}</td></tr>`;
+    }
+}
+
+function showAddWafRuleModal() {
+    document.getElementById('new-waf-filename').value = '';
+    new window.bootstrap.Modal(document.getElementById('addWafRuleModal')).show();
+}
+
+async function createWafRule() {
+    let filename = document.getElementById('new-waf-filename').value.trim();
+    if (!filename) {
+        alert('Lütfen bir dosya adı girin.');
+        return;
+    }
+
+    // Add .conf if not present
+    if (!filename.endsWith('.conf')) {
+        filename += '.conf';
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/waf/rules`, {
+            method: 'POST',
+            body: JSON.stringify({ filename, content: '# Custom WAF Rules\n# SecRule ... \n' }),
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+
+        if (response.ok) {
+            window.bootstrap.Modal.getInstance(document.getElementById('addWafRuleModal')).hide();
+            showAlert('Kural dosyası oluşturuldu: ' + filename, 'success');
+            loadWafRules();
+            // Open editor
+            setTimeout(() => editWafRule(filename), 500);
+        } else {
+            const err = await response.json();
+            alert('Hata: ' + (err.error || 'Bilinmeyen hata'));
+        }
+    } catch (e) {
+        alert('Hata: ' + e.message);
+    }
+}
+
+async function editWafRule(filename) {
+    try {
+        const response = await fetch(`${API_BASE}/waf/rules/${encodeURIComponent(filename)}`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+
+        if (!response.ok) throw new Error('Dosya yüklenemedi');
+
+        const data = await response.json();
+
+        document.getElementById('waf-editor-filename').value = data.filename;
+        document.getElementById('waf-editor-content').value = data.content;
+
+        new window.bootstrap.Modal(document.getElementById('wafRuleEditorModal')).show();
+
+    } catch (e) {
+        alert('Hata: ' + e.message);
+    }
+}
+
+async function saveWafRule() {
+    const filename = document.getElementById('waf-editor-filename').value;
+    const content = document.getElementById('waf-editor-content').value;
+
+    try {
+        const response = await fetch(`${API_BASE}/waf/rules/${encodeURIComponent(filename)}`, {
+            method: 'PUT',
+            body: JSON.stringify({ content }),
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+
+        if (response.ok) {
+            window.bootstrap.Modal.getInstance(document.getElementById('wafRuleEditorModal')).hide();
+            showAlert('Kural dosyası kaydedildi: ' + filename, 'success');
+            loadWafRules();
+        } else {
+            const err = await response.json();
+            alert('Hata: ' + (err.error || 'Bilinmeyen hata'));
+        }
+    } catch (e) {
+        alert('Hata: ' + e.message);
+    }
+}
+
+async function deleteWafRule() {
+    const filename = document.getElementById('waf-editor-filename').value;
+
+    if (!confirm(`"${filename}" dosyasını silmek istediğinize emin misiniz?\n\nBu işlem geri alınamaz!`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/waf/rules/${encodeURIComponent(filename)}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+
+        if (response.ok) {
+            window.bootstrap.Modal.getInstance(document.getElementById('wafRuleEditorModal')).hide();
+            showAlert('Kural dosyası silindi: ' + filename, 'warning');
+            loadWafRules();
+        } else {
+            const err = await response.json();
+            alert('Hata: ' + (err.error || 'Bilinmeyen hata'));
+        }
+    } catch (e) {
+        alert('Hata: ' + e.message);
+    }
+}
+
+async function reloadWaf() {
+    if (!confirm('SPOA (ModSecurity) servisini yeniden başlatmak istediğinize emin misiniz?\n\nBu işlem sırasında WAF koruması geçici olarak devre dışı kalabilir.')) {
+        return;
+    }
+
+    try {
+        showAlert('SPOA yeniden başlatılıyor...', 'info');
+
+        const response = await fetch(`${API_BASE}/waf/reload`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+
+        if (response.ok) {
+            showAlert('SPOA başarıyla yeniden başlatıldı!', 'success');
+        } else {
+            const err = await response.json();
+            alert('Hata: ' + (err.error || 'Bilinmeyen hata'));
+        }
+    } catch (e) {
+        alert('Hata: ' + e.message);
+    }
+}
+
+// Global cache for rules to resolve backend names
+let cachedRules = [];
 
 // Load Ingress Rules
 async function loadIngressRules() {
     try {
         const response = await fetch(`${API_BASE}/rules`, { headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {} });
         const rules = await response.json();
-        
+        cachedRules = rules; // Update global cache
+
+
         const tbody = document.getElementById('ingress-table-body');
         if (rules.length === 0) {
             tbody.innerHTML = '<tr><td colspan="8" class="text-center">Henüz kural eklenmemiş</td></tr>';
             return;
         }
-        
+
         tbody.innerHTML = rules.map(rule => {
             const sslBadge = rule.ssl_enabled
                 ? `<span class="badge bg-success">${rule.ssl_type === 'wildcard' ? 'Wildcard SSL' : 'SSL'}</span>`
@@ -108,6 +698,10 @@ async function loadIngressRules() {
                 ? backendList.map((backend, index) => `${backend.host}:${backend.port}${(rule.lb_mode === 'failover' && index > 0) ? ' (yedek)' : ''}`).join(', ')
                 : '-';
 
+            // Traffic data placeholder (will be populated by updateTrafficStats)
+            // Using data-backend to match HAProxy backend name: backend_{id}
+            const trafficHtml = `<span id="traffic-stats-${rule.id}" data-backend="backend_${rule.id}" class="small text-muted">Veri bekleniyor...</span>`;
+
             return `
             <tr>
                 <td>${rule.id}</td>
@@ -119,16 +713,17 @@ async function loadIngressRules() {
                     <small class="text-muted">${lbLabel}</small>
                 </td>
                 <td>${sslBadge}${redirectBadge}</td>
+                <td>${trafficHtml}</td>
                 <td>${rule.active ? '<span class="badge bg-success">Aktif</span>' : '<span class="badge bg-danger">Pasif</span>'}</td>
                 <td>
-                    ${rule.ssl_enabled ? 
-                        `<button class="btn btn-sm btn-warning" onclick="changeSSL('${rule.domain}', ${rule.id})" title="SSL Sertifikasını Değiştir">
+                    ${rule.ssl_enabled ?
+                    `<button class="btn btn-sm btn-warning" onclick="changeSSL('${rule.domain}', ${rule.id})" title="SSL Sertifikasını Değiştir">
                             <i class="bi bi-arrow-repeat"></i>
                         </button>` :
-                        `<button class="btn btn-sm btn-info" onclick="requestSSL('${rule.domain}', ${rule.id})" title="SSL Sertifikası İste">
+                    `<button class="btn btn-sm btn-info" onclick="requestSSL('${rule.domain}', ${rule.id})" title="SSL Sertifikası İste">
                             <i class="bi bi-shield-lock"></i>
                         </button>`
-                    }
+                }
                     <button class="btn btn-sm btn-warning" onclick="editIngressRule(${rule.id})">
                         <i class="bi bi-pencil"></i>
                     </button>
@@ -139,9 +734,13 @@ async function loadIngressRules() {
             </tr>
         `;
         }).join('');
+
+        // Start live traffic updates if not already started
+        startTrafficUpdates();
+
     } catch (error) {
         console.error('Error loading ingress rules:', error);
-        document.getElementById('ingress-table-body').innerHTML = 
+        document.getElementById('ingress-table-body').innerHTML =
             '<tr><td colspan="8" class="text-center text-danger">Hata: ' + error.message + '</td></tr>';
     }
 }
@@ -151,13 +750,13 @@ async function loadPortForwardRules() {
     try {
         const response = await fetch(`${API_BASE}/port-forwarding`, { headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {} });
         const rules = await response.json();
-        
+
         const tbody = document.getElementById('portforward-table-body');
         if (rules.length === 0) {
             tbody.innerHTML = '<tr><td colspan="7" class="text-center">Henüz kural eklenmemiş</td></tr>';
             return;
         }
-        
+
         tbody.innerHTML = rules.map(rule => `
             <tr>
                 <td>${rule.id}</td>
@@ -178,7 +777,7 @@ async function loadPortForwardRules() {
         `).join('');
     } catch (error) {
         console.error('Error loading port forward rules:', error);
-        document.getElementById('portforward-table-body').innerHTML = 
+        document.getElementById('portforward-table-body').innerHTML =
             '<tr><td colspan="7" class="text-center text-danger">Hata: ' + error.message + '</td></tr>';
     }
 }
@@ -201,8 +800,21 @@ async function loadSSLCertificates() {
 
         const tbody = document.getElementById('ssl-table-body');
         if (!certs || certs.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center">Henüz sertifika yok</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center">Henüz sertifika yok</td></tr>';
             return;
+        }
+
+        // Update header if not already updated
+        const thead = document.querySelector('#ssl-table thead tr');
+        if (thead && !thead.innerHTML.includes('Otomatik Yenileme')) {
+            thead.innerHTML = `
+                <th>Domain</th>
+                <th>Tip</th>
+                <th>Takip (DNS)</th>
+                <th>Bitiş Tarihi</th>
+                <th>Oto. Yenileme</th>
+                <th>İşlemler</th>
+             `;
         }
 
         tbody.innerHTML = certs.map(cert => {
@@ -210,7 +822,13 @@ async function loadSSLCertificates() {
             const sslTypeLabel = cert.ssl_type === 'wildcard' ? 'Wildcard' : (cert.ssl_type === 'normal' ? 'Normal' : (cert.ssl_type || '-'));
             const expiresValue = cert.expires_at || cert.filesystem?.expires || null;
             const updatedValue = cert.updated_at || cert.filesystem?.modified || null;
-            const dnsProvider = cert.dns_provider || '-';
+            const dnsProvider = cert.provider || cert.dns_provider || 'manual';
+
+            // Auto Renew Switch
+            const canAutoRenew = dnsProvider !== 'manual';
+            const autoRenewChecked = cert.auto_renew !== false;
+            const autoRenewDisabled = !canAutoRenew ? 'disabled' : '';
+            const autoRenewTitle = !canAutoRenew ? 'Bu sağlayıcı için otomatik yenileme desteklenmiyor' : 'Otomatik yenilemeyi aç/kapat';
 
             return `
                 <tr>
@@ -218,10 +836,22 @@ async function loadSSLCertificates() {
                     <td>${sslTypeLabel}</td>
                     <td>${dnsProvider}</td>
                     <td>${formatDateTime(expiresValue)}</td>
-                    <td>${formatDateTime(updatedValue, true)}</td>
                     <td>
-                        <button class="btn btn-sm btn-info me-2" onclick="viewCertificate('${displayDomain}')" title="Detayları Gör">
+                        <div class="form-check form-switch" title="${autoRenewTitle}">
+                            <input class="form-check-input" type="checkbox" 
+                                id="ar-${displayDomain}" 
+                                ${autoRenewChecked ? 'checked' : ''} 
+                                ${autoRenewDisabled}
+                                onchange="toggleAutoRenew('${displayDomain}', this.checked)">
+                             ${!canAutoRenew ? '<i class="bi bi-exclamation-circle text-warning ms-1" title="Manuel DNS işlemi gerektirir"></i>' : ''}
+                        </div>
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-info me-1" onclick="viewCertificate('${displayDomain}')" title="Detayları Gör">
                             <i class="bi bi-eye"></i>
+                        </button>
+                         <button class="btn btn-sm btn-warning me-1" onclick="manualRenew('${displayDomain}')" title="Şimdi Yenile">
+                            <i class="bi bi-arrow-repeat"></i>
                         </button>
                         <button class="btn btn-sm btn-danger" onclick="deleteCertificate('${displayDomain}')" title="Sertifikayı Sil">
                             <i class="bi bi-trash"></i>
@@ -232,7 +862,7 @@ async function loadSSLCertificates() {
         }).join('');
     } catch (error) {
         console.error('Error loading SSL certificates:', error);
-        document.getElementById('ssl-table-body').innerHTML = 
+        document.getElementById('ssl-table-body').innerHTML =
             '<tr><td colspan="6" class="text-center text-danger">Hata: ' + error.message + '</td></tr>';
     }
 }
@@ -244,28 +874,28 @@ function showAddIngressModal() {
     document.querySelector('#addIngressForm [name="id"]').value = '';
     document.querySelector('input[name="ssl_type"][value="none"]').checked = true;
     toggleSSLSelection();
-    
+
     const redirectCheckbox = document.getElementById('redirectToHttps');
     if (redirectCheckbox) {
         redirectCheckbox.checked = false;
         redirectCheckbox.disabled = true;
     }
-    
+
     const lbModeSelect = document.getElementById('lbMode');
     if (lbModeSelect) {
         lbModeSelect.value = 'roundrobin';
     }
-    
+
     const backendTargets = document.getElementById('backendTargets');
     if (backendTargets) {
         backendTargets.value = '';
     }
-    
+
     // Add event listener for domain input to load certificates
     const domainInput = form.querySelector('[name="domain"]');
     domainInput.removeEventListener('input', domainInputChangeHandler);
     domainInput.addEventListener('input', domainInputChangeHandler);
-    
+
     new bootstrap.Modal(document.getElementById('addIngressModal')).show();
 }
 
@@ -290,7 +920,7 @@ function toggleSSLCertDNSProvider() {
     const sslType = document.querySelector('#addSSLCertModal input[name="ssl_type"]:checked')?.value;
     const dnsGroup = document.getElementById('sslCertDNSProviderGroup');
     const dnsProvider = document.getElementById('sslCertDNSProvider');
-    
+
     if (sslType === 'wildcard') {
         dnsGroup.style.display = 'block';
         dnsProvider.required = true;
@@ -308,13 +938,18 @@ function toggleSSLCertDNSProvider() {
 function toggleSSLCertAPIKeyInput() {
     const dnsProvider = document.getElementById('sslCertDNSProvider')?.value;
     const warningEl = document.getElementById('sslCertHeNetWarning');
-    
+    const heIds = document.getElementById('heIds');
+
     if (dnsProvider === 'he-net') {
         if (warningEl) warningEl.style.display = 'block';
+        if (heIds) heIds.style.display = 'block';
+
         const helpEl = document.getElementById('sslCertDNSProviderHelp');
-        if (helpEl) helpEl.textContent = 'Hurricane Electric için resmi API yoktur. Manuel DNS challenge gerekir.';
+        if (helpEl) helpEl.textContent = 'Hurricane Electric (HE.net) için kullanıcı adı ve şifre/key gereklidir.';
     } else {
         if (warningEl) warningEl.style.display = 'none';
+        if (heIds) heIds.style.display = 'none';
+
         const helpEl = document.getElementById('sslCertDNSProviderHelp');
         if (helpEl) helpEl.textContent = 'DNS credentials dosyasını /app/config/certbot/creds/ klasörüne eklemeniz gerekiyor';
     }
@@ -324,29 +959,35 @@ function toggleSSLCertAPIKeyInput() {
 async function addSSLCertificate() {
     const form = document.getElementById('addSSLCertForm');
     const formData = new FormData(form);
-    
+
     const domain = formData.get('domain')?.trim();
     const email = formData.get('email')?.trim();
-    const dnsProvider = formData.get('dns_provider');
-    
+    const he_username = formData.get('he_username')?.trim();
+    const he_password = formData.get('he_password')?.trim();
+
     // Validation
     if (!domain || !isValidDomain(domain)) {
         showAlert('Geçerli bir domain girin', 'warning');
         return;
     }
-    
+
     if (!email || !isValidEmail(email)) {
         showAlert('Geçerli bir e-posta adresi girin', 'warning');
         return;
     }
-    
+
     if (domain.startsWith('*.') && !dnsProvider) {
         showAlert('Wildcard sertifika için DNS provider seçimi gerekli', 'warning');
         return;
     }
-    
+
+    if (dnsProvider === 'he-net' && (!he_username || !he_password)) {
+        showAlert('HE.net için kullanıcı adı ve şifre/key zorunludur', 'warning');
+        return;
+    }
+
     console.log('Starting SSL certificate request for:', domain);
-    
+
     // Show initial progress
     const steps = [
         'SSL isteği hazırlanıyor',
@@ -356,7 +997,7 @@ async function addSSLCertificate() {
     ];
     showSSLSteps(0, steps);
     showSSLProgress('SSL sertifika isteği başlatılıyor...', 'info');
-    
+
     // Disable form submit button
     const submitBtn = form.querySelector('button[type="submit"]');
     const originalBtnText = submitBtn?.innerHTML;
@@ -364,24 +1005,24 @@ async function addSSLCertificate() {
         submitBtn.disabled = true;
         submitBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> İşleniyor...';
     }
-    
+
     try {
         showSSLSteps(1, steps);
-        showSSLProgress('Certbot container\'a bağlanılıyor...', 'info');
-        
+        showSSLProgress('Container\'a bağlanılıyor...', 'info');
+
         const res = await fetch(`${API_BASE}/ssl/request`, {
             method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json', 
-                'Authorization': `Bearer ${authToken}` 
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
             },
-            body: JSON.stringify({ domain, email, dnsProvider })
+            body: JSON.stringify({ domain, email, dnsProvider, he_username, he_password })
         });
-        
+
         console.log('Response status:', res.status);
         showSSLSteps(2, steps);
         showSSLProgress('Sunucu yanıtı alındı, işleniyor...', 'info');
-        
+
         let data;
         try {
             data = await res.json();
@@ -392,18 +1033,18 @@ async function addSSLCertificate() {
             hideSSLProgress();
             throw new Error('Sunucudan geçersiz yanıt alındı');
         }
-        
+
         try {
             if (res.ok && data.success) {
                 console.log('SSL certificate request successful');
                 showSSLSteps(3, steps);
                 showSSLProgress('SSL sertifikası başarıyla oluşturuldu!', 'success');
-                
+
                 // Show certbot output if available
                 if (data.certbot_output) {
                     console.log('Certbot Output:', data.certbot_output);
                 }
-                
+
                 console.log('Hiding modal and showing success message');
                 setTimeout(() => {
                     hideSSLSteps();
@@ -414,7 +1055,7 @@ async function addSSLCertificate() {
                     }
                     showAlert('✅ SSL sertifikası başarıyla eklendi!', 'success');
                 }, 2000);
-                
+
                 await loadSSLCertificates();
             } else if (res.status === 202) {
                 // Manual DNS challenge required
@@ -451,53 +1092,56 @@ async function addSSLCertificate() {
 // Save SSL Certificate (from SSL menu)
 async function saveSSLCertificate() {
     console.log('saveSSLCertificate called');
-    
+
     try {
         const form = document.getElementById('addSSLCertForm');
         if (!form) {
             alert('Form bulunamadı!');
             return;
         }
-        
+
         const formData = new FormData(form);
-        
+
         const domain = formData.get('domain')?.trim();
         const sslType = formData.get('ssl_type');
         const email = formData.get('email');
         const dnsProvider = formData.get('dns_provider') || null;
-        
+
         console.log('Form data:', { domain, sslType, email, dnsProvider });
-        
+
         if (!domain || !email) {
             alert('Domain ve e-posta gerekli');
             return;
         }
-        
+
         // Note: he-net için confirm dialog kaldırıldı
         // Kullanıcı zaten modal'da uyarı mesajını görmüş durumda
         if (dnsProvider === 'he-net') {
             console.log('he-net detected, proceeding with manual DNS challenge');
         }
-        
+
         const sslDomain = sslType === 'wildcard' ? (domain.startsWith('*.') ? domain : '*.' + domain) : domain;
-        
+
+        const he_username = formData.get('he_username')?.trim();
+        const he_password = formData.get('he_password')?.trim();
+
         console.log('Sending SSL request:', { domain: sslDomain, email, dnsProvider });
         console.log('API_BASE:', API_BASE);
         console.log('authToken:', authToken ? 'exists' : 'missing');
-        
-        const requestBody = { domain: sslDomain, email, dnsProvider };
-        console.log('Request body:', requestBody);
-        
+
+        const requestBody = { domain: sslDomain, email, dnsProvider, he_username, he_password };
+        console.log('Request body:', { ...requestBody, he_password: '***' }); // Log masked password
+
         try {
             const res = await fetch(`${API_BASE}/ssl/request`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
                 body: JSON.stringify(requestBody)
             });
-            
+
             console.log('Response status:', res.status);
             console.log('Response ok:', res.ok);
-            
+
             let data;
             try {
                 data = await res.json();
@@ -506,20 +1150,20 @@ async function saveSSLCertificate() {
                 throw new Error(`Server returned invalid JSON. Status: ${res.status}`);
             }
             console.log('Response data:', data);
-            
+
             // Check for rate limit error first
             if (res.status === 429 || data.type === 'RATE_LIMIT') {
                 const formattedMessage = data.message || formatRetryAfterMessage(data.retryAfter);
                 showAlert(`⏰ Let's Encrypt Rate Limit\n\nÇok fazla başarısız deneme yapıldı.\n\n${formattedMessage}\n\nNot: Rate limit genellikle 1 saat sonra sıfırlanır.`, 'warning');
                 return;
             }
-            
+
             // Check for manual DNS challenge first (202 status)
             if (res.status === 202 || data.requires_manual_dns) {
                 console.log('Response 202 - Manual DNS challenge required');
                 console.log('data.txt_record:', data.txt_record);
                 console.log('data.txt_domain:', data.txt_domain);
-                
+
                 // Manual DNS challenge required
                 if (data.txt_record) {
                     console.log('TXT record found, preparing alert...');
@@ -536,9 +1180,9 @@ async function saveSSLCertificate() {
                         `      - Value: ${data.txt_record}\n` +
                         `   4. 2-5 dakika bekleyin (DNS propagation)\n` +
                         `   5. "Tekrar Dene" butonuna basın`;
-                    
+
                     console.log('TXT Info prepared:', txtInfo.substring(0, 100) + '...');
-                    
+
                     try {
                         // Hide SSL cert modal first
                         console.log('Hiding SSL cert modal...');
@@ -547,11 +1191,11 @@ async function saveSSLCertificate() {
                             sslCertModal.hide();
                             console.log('SSL cert modal hidden');
                         }
-                        
+
                         // Small delay to ensure modal is closed
                         setTimeout(async () => {
                             console.log('Showing DNS challenge modal...');
-                            
+
                             try {
                                 // Populate DNS challenge modal
                                 const baseDomain = data.domain.replace('*.', '');
@@ -561,13 +1205,13 @@ async function saveSSLCertificate() {
                                 const dnsChallengeValueEl = document.getElementById('dnsChallengeValue');
                                 const dnsChallengeNameDisplayEl = document.getElementById('dnsChallengeNameDisplay');
                                 const dnsChallengeValueDisplayEl = document.getElementById('dnsChallengeValueDisplay');
-                                
+
                                 if (!dnsChallengeDomainEl || !dnsChallengeNameEl || !dnsChallengeValueEl) {
                                     console.error('DNS challenge modal elements not found!');
                                     alert(txtInfo); // Fallback to alert
                                     return;
                                 }
-                                
+
                                 dnsChallengeDomainEl.textContent = data.domain;
                                 if (dnsChallengeBaseDomainEl) {
                                     dnsChallengeBaseDomainEl.textContent = baseDomain;
@@ -580,19 +1224,19 @@ async function saveSSLCertificate() {
                                 if (dnsChallengeValueDisplayEl) {
                                     dnsChallengeValueDisplayEl.textContent = data.txt_record;
                                 }
-                                
-                            // Store retry info
-                            const emailInput = document.querySelector('#addSSLCertModal input[name="email"]');
-                            window.lastDNSChallengeData = {
-                                domain: data.domain,
-                                email: emailInput ? emailInput.value : '',
-                                dnsProvider: data.dns_provider || data.dnsProvider || 'he-net',
-                                txt_domain: data.txt_domain,
-                                txt_record: data.txt_record,
-                                lastTxtRecord: data.txt_record, // Store initial TXT record to detect changes
-                                session_id: data.session_id || null
-                            };
-                                
+
+                                // Store retry info
+                                const emailInput = document.querySelector('#addSSLCertModal input[name="email"]');
+                                window.lastDNSChallengeData = {
+                                    domain: data.domain,
+                                    email: emailInput ? emailInput.value : '',
+                                    dnsProvider: data.dns_provider || data.dnsProvider || 'he-net',
+                                    txt_domain: data.txt_domain,
+                                    txt_record: data.txt_record,
+                                    lastTxtRecord: data.txt_record, // Store initial TXT record to detect changes
+                                    session_id: data.session_id || null
+                                };
+
                                 // Show DNS challenge modal
                                 const dnsModalEl = document.getElementById('dnsChallengeModal');
                                 if (!dnsModalEl) {
@@ -600,7 +1244,7 @@ async function saveSSLCertificate() {
                                     alert(txtInfo); // Fallback to alert
                                     return;
                                 }
-                                
+
                                 const dnsModal = new bootstrap.Modal(dnsModalEl, {
                                     backdrop: 'static',
                                     keyboard: false
@@ -623,14 +1267,14 @@ async function saveSSLCertificate() {
                 }
             } else if (res.ok) {
                 console.log('Response OK, SSL certificate created successfully');
-                
+
                 // Show certbot output if available
                 if (data.certbot_output && (data.certbot_output.stdout || data.certbot_output.stderr)) {
                     console.log('Certbot Output:', data.certbot_output);
                     const output = `Certbot Çıktısı:\n\nSTDOUT:\n${data.certbot_output.stdout || '(boş)'}\n\nSTDERR:\n${data.certbot_output.stderr || '(boş)'}`;
                     console.log(output);
                 }
-                
+
                 console.log('Hiding modal and showing success message');
                 const modal = bootstrap.Modal.getInstance(document.getElementById('addSSLCertModal'));
                 if (modal) {
@@ -641,11 +1285,11 @@ async function saveSSLCertificate() {
             } else {
                 console.log('Response not OK, status:', res.status);
                 // data already parsed above
-                const e = data || {error:'Hata'};
+                const e = data || { error: 'Hata' };
                 console.log('Error response:', e);
-                
+
                 let errorMsg = 'Hata: ' + (e.error || res.status);
-                
+
                 // Show certbot output if available
                 if (e.certbot_output) {
                     const output = `Certbot Çıktısı:\n\nSTDOUT:\n${e.certbot_output.stdout || '(boş)'}\n\nSTDERR:\n${e.certbot_output.stderr || '(boş)'}`;
@@ -656,7 +1300,7 @@ async function saveSSLCertificate() {
                     }
                     console.error('Certbot Error Output:', e.certbot_output);
                 }
-                
+
                 alert(errorMsg);
             }
         } catch (fetchError) {
@@ -674,17 +1318,17 @@ async function saveSSLCertificate() {
 async function saveIngressRule() {
     const form = document.getElementById('addIngressForm');
     const formData = new FormData(form);
-    
+
     const sslType = formData.get('ssl_type');
     const sslCertId = formData.get('ssl_cert_id');
     const newSslType = formData.get('new_ssl_type');
     const domain = formData.get('domain')?.trim();
-    
+
     let sslEnabled = false;
     let sslTypeValue = 'none';
     let sslCert = null;
     let dnsProvider = null;
-    
+
     const lbMode = (formData.get('lb_mode') || 'roundrobin').toLowerCase();
     const normalizedLbMode = ['roundrobin', 'failover'].includes(lbMode) ? lbMode : 'roundrobin';
 
@@ -710,9 +1354,9 @@ async function saveIngressRule() {
         alert('En az bir backend host/port kombinasyonu girilmelidir.');
         return;
     }
-    
+
     const primaryBackend = backends[0];
-    
+
     if (sslType === 'select' && sslCertId) {
         // Use existing certificate
         const certSelect = document.getElementById('sslCertSelect');
@@ -725,34 +1369,36 @@ async function saveIngressRule() {
         sslEnabled = true;
         sslTypeValue = newSslType;
         dnsProvider = formData.get('dns_provider') || null;
-        
+
         // Request certificate will be handled separately
         const email = prompt('SSL sertifikası için e-posta adresi:');
         if (!email) {
             alert('E-posta gerekli, işlem iptal edildi');
             return;
         }
-        
+
         const sslDomain = newSslType === 'wildcard' ? '*.' + domain : domain;
-        
+
         if (dnsProvider === 'he-net') {
             if (!confirm('Hurricane Electric için manuel DNS challenge gerekir. Certbot size TXT kaydını gösterecek, bunu dns.he.net\'ten manuel olarak eklemeniz gerekecek. Devam etmek istiyor musunuz?')) {
                 return;
             }
         }
-        
+
         try {
             const sslRes = await fetch(`${API_BASE}/ssl/request`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
-                body: JSON.stringify({ 
-                    domain: sslDomain, 
-                    email, 
+                body: JSON.stringify({
+                    domain: sslDomain,
+                    email,
                     dnsProvider,
+                    he_username: formData.get('he_username')?.trim(), // From Ingress Modal
+                    he_password: formData.get('he_password')?.trim(), // From Ingress Modal
                     assignToRuleId: formData.get('id') || null
                 })
             });
-            
+
             if (!sslRes.ok) {
                 if (sslRes.status === 202) {
                     // Manual DNS challenge required
@@ -771,16 +1417,16 @@ async function saveIngressRule() {
                             `   - Value: ${data.txt_record}\n` +
                             `4. Birkaç dakika bekleyin (DNS propagation)\n` +
                             `5. Sonra tekrar "Kaydet" butonuna basın`;
-                        
+
                         alert(txtInfo);
                         return;
                     }
                 }
-                const e = await sslRes.json().catch(()=>({error:'Hata'}));
+                const e = await sslRes.json().catch(() => ({ error: 'Hata' }));
                 alert('SSL sertifikası alınamadı: ' + (e.error || sslRes.status));
                 return;
             }
-            
+
             const sslResult = await sslRes.json();
             if (sslResult.certificate) {
                 sslCert = sslResult.certificate.cert_path;
@@ -790,7 +1436,7 @@ async function saveIngressRule() {
             return;
         }
     }
-    
+
     const data = {
         name: formData.get('name')?.trim(),
         domain: domain,
@@ -806,7 +1452,7 @@ async function saveIngressRule() {
         active: true,
         redirect_to_https: document.getElementById('redirectToHttps')?.checked || false
     };
-    
+
     try {
         const id = formData.get('id');
         const url = id ? `${API_BASE}/rules/${id}` : `${API_BASE}/rules`;
@@ -816,7 +1462,7 @@ async function saveIngressRule() {
             headers: { 'Content-Type': 'application/json', ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}) },
             body: JSON.stringify(data)
         });
-        
+
         if (response.ok) {
             bootstrap.Modal.getInstance(document.getElementById('addIngressModal')).hide();
             await loadIngressRules();
@@ -846,7 +1492,7 @@ function showAddPortForwardModal() {
 async function savePortForwardRule() {
     const form = document.getElementById('addPortForwardForm');
     const formData = new FormData(form);
-    
+
     const data = {
         name: formData.get('name'),
         frontend_port: parseInt(formData.get('frontend_port')),
@@ -854,7 +1500,7 @@ async function savePortForwardRule() {
         backend_port: parseInt(formData.get('backend_port')),
         protocol: formData.get('protocol') || 'tcp'
     };
-    
+
     try {
         const id = formData.get('id');
         const url = id ? `${API_BASE}/port-forwarding/${id}` : `${API_BASE}/port-forwarding`;
@@ -864,7 +1510,7 @@ async function savePortForwardRule() {
             headers: { 'Content-Type': 'application/json', ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}) },
             body: JSON.stringify(data)
         });
-        
+
         if (response.ok) {
             bootstrap.Modal.getInstance(document.getElementById('addPortForwardModal')).hide();
             loadPortForwardRules();
@@ -881,13 +1527,13 @@ async function savePortForwardRule() {
 // Delete Ingress Rule
 async function deleteIngressRule(id) {
     if (!confirm('Bu kuralı silmek istediğinizden emin misiniz?')) return;
-    
+
     try {
         const response = await fetch(`${API_BASE}/rules/${id}`, {
             method: 'DELETE',
             headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
         });
-        
+
         if (response.ok) {
             loadIngressRules();
             alert('Kural başarıyla silindi!');
@@ -907,13 +1553,13 @@ async function copyToClipboard(inputId) {
         console.error('Input element not found:', inputId);
         return;
     }
-    
+
     const textToCopy = input.value;
     if (!textToCopy) {
         alert('Kopyalanacak metin bulunamadı.');
         return;
     }
-    
+
     try {
         // Try modern Clipboard API first
         if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -926,7 +1572,7 @@ async function copyToClipboard(inputId) {
                 throw new Error('execCommand failed');
             }
         }
-        
+
         // Show feedback
         const btn = input.parentElement.querySelector('button');
         if (btn) {
@@ -955,10 +1601,10 @@ async function retryDNSChallenge() {
         showAlert('Hata: Retry bilgisi bulunamadı. Lütfen tekrar deneyin.', 'danger');
         return;
     }
-    
+
     const data = window.lastDNSChallengeData;
     console.log('Retrying DNS challenge with data:', data);
-    
+
     // Show progress steps
     const steps = [
         'DNS kaydı kontrol ediliyor',
@@ -968,50 +1614,50 @@ async function retryDNSChallenge() {
     ];
     showSSLSteps(0, steps);
     showSSLProgress('DNS challenge doğrulaması başlatılıyor...', 'info');
-    
+
     // Show loading state first (before closing modal)
     const retryBtn = document.querySelector('#dnsChallengeModal .btn-primary');
     if (retryBtn) {
         retryBtn.disabled = true;
         retryBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Kontrol ediliyor...';
     }
-    
+
     // Call API with retry flag
     try {
         showSSLSteps(1, steps);
         showSSLProgress('Certbot ile DNS challenge doğrulanıyor...', 'info');
-        
+
         // Create AbortController for timeout (70 seconds - longer than API polling)
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 70000);
-        
+
         const res = await fetch(`${API_BASE}/ssl/continue`, {
             method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json', 
-                'Authorization': `Bearer ${authToken}` 
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
             },
             body: JSON.stringify({
                 domain: data.domain
             }),
             signal: controller.signal
         });
-        
+
         clearTimeout(timeoutId);
-        
+
         const responseData = await res.json();
-        
+
         if (res.status === 200 && responseData.success) {
             // Success! Certificate obtained
             showSSLSteps(3, steps);
             showSSLProgress('SSL sertifikası başarıyla oluşturuldu!', 'success');
-            
+
             setTimeout(() => {
                 hideSSLSteps();
                 hideSSLProgress();
                 showAlert('✅ SSL sertifikası başarıyla alındı!', 'success');
             }, 2000);
-            
+
             await loadSSLCertificates();
             // Close modal
             const dnsModal = bootstrap.Modal.getInstance(document.getElementById('dnsChallengeModal'));
@@ -1020,47 +1666,47 @@ async function retryDNSChallenge() {
             }
         } else if (res.status === 202 || (res.ok && !responseData.success)) {
             // Still waiting for DNS propagation or new challenge token
-            const isNewToken = responseData.txt_record && window.lastDNSChallengeData && 
-                               responseData.txt_record !== window.lastDNSChallengeData.lastTxtRecord;
-            
+            const isNewToken = responseData.txt_record && window.lastDNSChallengeData &&
+                responseData.txt_record !== window.lastDNSChallengeData.lastTxtRecord;
+
             if (isNewToken) {
                 // New challenge token created - update the modal
                 alert('⚠️ Yeni bir challenge token oluşturuldu. Lütfen DNS kaydını güncelleyin:\n\n' +
-                      'TXT Record Name: ' + responseData.txt_domain + '\n' +
-                      'TXT Record Value: ' + responseData.txt_record + '\n\n' +
-                      'Eski kaydı silip yeni kaydı ekleyin.');
-                
+                    'TXT Record Name: ' + responseData.txt_domain + '\n' +
+                    'TXT Record Value: ' + responseData.txt_record + '\n\n' +
+                    'Eski kaydı silip yeni kaydı ekleyin.');
+
                 // Update modal with new token (with null checks)
                 const nameInput = document.getElementById('dnsChallengeName');
                 const valueInput = document.getElementById('dnsChallengeValue');
                 const nameDisplay = document.getElementById('dnsChallengeNameDisplay');
                 const valueDisplay = document.getElementById('dnsChallengeValueDisplay');
-                
+
                 if (nameInput) nameInput.value = responseData.txt_domain;
                 if (valueInput) valueInput.value = responseData.txt_record;
                 if (nameDisplay) nameDisplay.textContent = responseData.txt_domain;
                 if (valueDisplay) valueDisplay.textContent = responseData.txt_record;
-                
+
                 // Store new token
                 if (responseData.txt_domain) window.lastDNSChallengeData.txt_domain = responseData.txt_domain;
                 if (responseData.txt_record) {
                     window.lastDNSChallengeData.txt_record = responseData.txt_record;
                     window.lastDNSChallengeData.lastTxtRecord = responseData.txt_record;
                 }
-                
+
                 // Show modal again
                 const dnsModal = new bootstrap.Modal(document.getElementById('dnsChallengeModal'));
                 dnsModal.show();
             } else {
                 const txtDomain = responseData.txt_domain || (window.lastDNSChallengeData && window.lastDNSChallengeData.txt_domain) || '_acme-challenge.' + (data.domain.startsWith('*.') ? data.domain.substring(2) : data.domain);
                 const txtRecord = responseData.txt_record || (window.lastDNSChallengeData && window.lastDNSChallengeData.txt_record) || 'Bilinmiyor';
-                
+
                 alert('⚠️ DNS kaydı henüz yayılmamış olabilir. Lütfen 2-5 dakika bekleyip tekrar deneyin.\n\n' +
-                      'TXT kaydının doğru eklendiğinden emin olun:\n' +
-                      'Name: ' + txtDomain + '\n' +
-                      'Value: ' + txtRecord);
+                    'TXT kaydının doğru eklendiğinden emin olun:\n' +
+                    'Name: ' + txtDomain + '\n' +
+                    'Value: ' + txtRecord);
             }
-            
+
             if (retryBtn) {
                 retryBtn.disabled = false;
                 retryBtn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Tekrar Dene';
@@ -1087,14 +1733,14 @@ async function retryDNSChallenge() {
     } catch (error) {
         console.error('Retry error:', error);
         hideSSLSteps();
-        
+
         // Handle AbortError (timeout)
         if (error.name === 'AbortError') {
             showSSLProgress('İstek zaman aşımına uğradı. Process hala çalışıyor olabilir. Lütfen birkaç dakika bekleyip tekrar deneyin.', 'warning');
         } else {
             showSSLProgress('Hata: ' + error.message, 'danger');
         }
-        
+
         if (retryBtn) {
             retryBtn.disabled = false;
             retryBtn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Tekrar Dene';
@@ -1140,7 +1786,7 @@ function showCertbotErrorModal(errorMessage, certbotOutput) {
         document.body.insertAdjacentHTML('beforeend', modalHtml);
         errorModal = document.getElementById('certbotErrorModal');
     }
-    
+
     // Populate modal content
     document.getElementById('certbotErrorMessage').textContent = errorMessage;
     const outputText = `STDOUT:
@@ -1152,7 +1798,7 @@ ${certbotOutput.stderr || '(boş)'}
 FULL OUTPUT:
 ${certbotOutput.fullOutput || '(boş)'}`;
     document.getElementById('certbotErrorOutput').value = outputText;
-    
+
     // Show modal
     const modal = new bootstrap.Modal(errorModal);
     modal.show();
@@ -1170,7 +1816,7 @@ Hata Mesajı: ${errorMessage}
 ${errorOutput}
 
 Tarih: ${new Date().toLocaleString('tr-TR')}`;
-    
+
     navigator.clipboard.writeText(fullError).then(() => {
         showAlert('Hata detayları panoya kopyalandı', 'success');
     }).catch(err => {
@@ -1207,11 +1853,11 @@ function showCredentialsHelp(provider) {
         document.body.insertAdjacentHTML('beforeend', modalHtml);
         helpModal = document.getElementById('credentialsHelpModal');
     }
-    
+
     // Generate help content based on provider
     const helpContent = generateCredentialsHelp(provider);
     document.getElementById('credentialsHelpContent').innerHTML = helpContent;
-    
+
     // Show modal
     const modal = new bootstrap.Modal(helpModal);
     modal.show();
@@ -1224,7 +1870,7 @@ function generateCredentialsHelp(provider) {
             <strong>Genel Bilgi:</strong> DNS kimlik bilgileri dosyası <code>/app/config/certbot/creds/</code> klasöründe olmalıdır.
         </div>
     `;
-    
+
     switch (provider) {
         case 'cloudflare':
             return baseInstructions + `
@@ -1292,23 +1938,23 @@ async function showDebugOutput() {
         showAlert('Hata: DNS challenge bilgisi bulunamadı.', 'danger');
         return;
     }
-    
+
     const data = window.lastDNSChallengeData;
-    
+
     // Show loading state
     const debugModal = new bootstrap.Modal(document.getElementById('debugOutputModal'));
     debugModal.show();
-    
+
     document.getElementById('debugCommand').textContent = 'Yükleniyor...';
     document.getElementById('debugOutput').textContent = 'Komut çalıştırılıyor...';
     document.getElementById('debugExitCode').textContent = '-';
-    
+
     try {
         const res = await fetch(`${API_BASE}/ssl/debug`, {
             method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json', 
-                'Authorization': `Bearer ${authToken}` 
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
             },
             body: JSON.stringify({
                 domain: data.domain,
@@ -1317,20 +1963,20 @@ async function showDebugOutput() {
                 retry: false // First run to see the challenge
             })
         });
-        
+
         const responseData = await res.json();
-        
+
         if (res.ok && responseData.success) {
             // Show command
             document.getElementById('debugCommand').textContent = responseData.command || 'Komut bulunamadı';
-            
+
             // Show full output
             const fullOutput = `=== STDOUT ===\n${responseData.stdout || '(boş)'}\n\n=== STDERR ===\n${responseData.stderr || '(boş)'}\n\n=== FULL OUTPUT ===\n${responseData.fullOutput || '(boş)'}`;
             document.getElementById('debugOutput').textContent = fullOutput;
-            
+
             // Show exit code
             document.getElementById('debugExitCode').textContent = responseData.exitCode !== undefined ? responseData.exitCode : '-';
-            
+
             // Color code based on exit code
             const exitCodeEl = document.getElementById('debugExitCode');
             exitCodeEl.className = 'badge ';
@@ -1356,19 +2002,19 @@ async function runDebugCommand() {
         alert('Hata: DNS challenge bilgisi bulunamadı.');
         return;
     }
-    
+
     const data = window.lastDNSChallengeData;
-    
+
     // Show loading state
     document.getElementById('debugOutput').textContent = 'Komut çalıştırılıyor (retry mode)...';
     document.getElementById('debugExitCode').textContent = '-';
-    
+
     try {
         const res = await fetch(`${API_BASE}/ssl/debug`, {
             method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json', 
-                'Authorization': `Bearer ${authToken}` 
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
             },
             body: JSON.stringify({
                 domain: data.domain,
@@ -1377,17 +2023,17 @@ async function runDebugCommand() {
                 retry: true // Retry mode with yes command
             })
         });
-        
+
         const responseData = await res.json();
-        
+
         if (res.ok && responseData.success) {
             // Show full output
             const fullOutput = `=== STDOUT ===\n${responseData.stdout || '(boş)'}\n\n=== STDERR ===\n${responseData.stderr || '(boş)'}\n\n=== FULL OUTPUT ===\n${responseData.fullOutput || '(boş)'}`;
             document.getElementById('debugOutput').textContent = fullOutput;
-            
+
             // Show exit code
             document.getElementById('debugExitCode').textContent = responseData.exitCode !== undefined ? responseData.exitCode : '-';
-            
+
             // Color code based on exit code
             const exitCodeEl = document.getElementById('debugExitCode');
             exitCodeEl.className = 'badge ';
@@ -1416,7 +2062,7 @@ let fitAddon = null;
 function openTerminal() {
     const terminalModal = new bootstrap.Modal(document.getElementById('terminalModal'));
     terminalModal.show();
-    
+
     // Initialize terminal
     if (!terminal) {
         // Use xterm.js from CDN
@@ -1430,19 +2076,19 @@ function openTerminal() {
                 cursor: '#00ff00'
             }
         });
-        
+
         // Use FitAddon from CDN
         if (window.FitAddon) {
             fitAddon = new window.FitAddon.FitAddon();
             terminal.loadAddon(fitAddon);
         }
-        
+
         terminal.open(document.getElementById('terminal'));
-        
+
         if (fitAddon) {
             fitAddon.fit();
         }
-        
+
         // Handle terminal resize
         window.addEventListener('resize', () => {
             if (fitAddon) {
@@ -1453,7 +2099,7 @@ function openTerminal() {
         // Clear terminal on reconnect
         terminal.clear();
     }
-    
+
     // Connect WebSocket
     connectTerminal();
 }
@@ -1463,7 +2109,7 @@ function connectTerminal() {
     if (terminalSocket) {
         terminalSocket.close();
     }
-    
+
     // Get auth token - use the same key as the rest of the app
     const authToken = localStorage.getItem('token');
     if (!authToken) {
@@ -1474,25 +2120,25 @@ function connectTerminal() {
         }, 3000);
         return;
     }
-    
+
     // Determine WebSocket URL
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsHost = window.location.hostname;
     const wsPort = window.location.port || (window.location.protocol === 'https:' ? 443 : 80);
     const wsUrl = `${wsProtocol}//${wsHost}:3000/ws/terminal?token=${encodeURIComponent(authToken)}`;
-    
+
     terminal.write('\r\n[INFO] Connecting to Certbot container...\r\n');
-    
+
     terminalSocket = new WebSocket(wsUrl);
-    
+
     terminalSocket.onopen = () => {
         terminal.write('\r\n[SUCCESS] Connected to Certbot container!\r\n');
         terminal.write('[INFO] Type commands and press Enter to execute.\r\n');
         terminal.write('[INFO] Type "exit" to disconnect.\r\n\r\n');
         terminal.write('$ ');
-        
+
         let commandBuffer = '';
-        
+
         // Send terminal input to WebSocket (only send complete commands on Enter)
         terminal.onData((data) => {
             // Handle backspace
@@ -1503,19 +2149,19 @@ function connectTerminal() {
                 }
                 return;
             }
-            
+
             // Handle Enter
             if (data === '\r' || data === '\n') {
                 terminal.write('\r\n');
                 const command = commandBuffer.trim();
                 commandBuffer = '';
-                
+
                 if (command === 'exit' || command === 'quit') {
                     terminal.write('[INFO] Disconnecting...\r\n');
                     disconnectTerminal();
                     return;
                 }
-                
+
                 if (command && terminalSocket && terminalSocket.readyState === WebSocket.OPEN) {
                     terminalSocket.send(command);
                 } else if (!command) {
@@ -1523,7 +2169,7 @@ function connectTerminal() {
                 }
                 return;
             }
-            
+
             // Handle other characters
             if (data.charCodeAt(0) >= 32 && data.charCodeAt(0) <= 126) {
                 commandBuffer += data;
@@ -1531,15 +2177,15 @@ function connectTerminal() {
             }
         });
     };
-    
+
     terminalSocket.onmessage = (event) => {
         terminal.write(event.data);
     };
-    
+
     terminalSocket.onerror = (error) => {
         terminal.write(`\r\n[ERROR] WebSocket error: ${error.message || 'Unknown error'}\r\n`);
     };
-    
+
     terminalSocket.onclose = () => {
         terminal.write('\r\n[INFO] Connection closed.\r\n');
         terminalSocket = null;
@@ -1568,13 +2214,13 @@ function clearTerminal() {
 // Delete Port Forward Rule
 async function deletePortForwardRule(id) {
     if (!confirm('Bu port forwarding kuralını silmek istediğinizden emin misiniz?')) return;
-    
+
     try {
         const response = await fetch(`${API_BASE}/port-forwarding/${id}`, {
             method: 'DELETE',
             headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
         });
-        
+
         if (response.ok) {
             loadPortForwardRules();
             alert('Port forwarding kuralı başarıyla silindi!');
@@ -1720,7 +2366,7 @@ async function editIngressRule(id) {
             const extra = backendList.slice(1).map(item => `${item.host}:${item.port}`).join('\n');
             backendTargets.value = extra;
         }
- 
+
         // Set SSL selection based on rule
         if (rule.ssl_enabled && rule.ssl_cert) {
             // Check if certificate exists in pool
@@ -1733,7 +2379,7 @@ async function editIngressRule(id) {
                 if (certSelect) {
                     const options = Array.from(certSelect.options);
                     let selected = options.find(opt => opt.getAttribute('data-cert-path') === rule.ssl_cert);
- 
+
                     if (!selected) {
                         const certs = await loadAllCertificates();
                         const matchingCert = certs.find(c => c.cert_path === rule.ssl_cert || c.cert_domain === rule.ssl_cert?.replace('.pem', ''));
@@ -1752,7 +2398,7 @@ async function editIngressRule(id) {
             form.querySelector('input[name="ssl_type"][value="none"]').checked = true;
             toggleSSLSelection();
         }
- 
+
         updateRedirectAvailability();
         const redirectCheckbox = document.getElementById('redirectToHttps');
         if (redirectCheckbox) {
@@ -1796,34 +2442,34 @@ document.addEventListener('DOMContentLoaded', () => {
 // SSL request helper
 async function requestSSL(domain, ruleId = null) {
     if (!authToken) return alert('Önce giriş yapın.');
-    
+
     const sslType = prompt('SSL Tipi seçin:\n1 - Normal SSL (domain.com) - Webroot Challenge\n2 - Wildcard SSL (*.domain.com) - DNS Challenge\n\nNumara girin (1 veya 2):', '1');
     if (!sslType) return;
-    
+
     const isWildcard = sslType === '2';
     const sslDomain = isWildcard ? '*.' + domain : domain;
     const email = prompt('Sertifika için e-posta adresi:');
     if (!email) return;
-    
+
     let dnsProvider = null;
     if (isWildcard) {
         dnsProvider = prompt('DNS Provider (cloudflare, route53, digitalocean, godaddy):', 'cloudflare');
         if (!dnsProvider) return;
     }
-    
+
     try {
         const res = await fetch(`${API_BASE}/ssl/request`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
             body: JSON.stringify({ domain: sslDomain, email, dnsProvider, ruleId })
         });
-        
+
         if (res.ok) {
             alert('SSL sertifikası başarıyla istendi!');
             loadIngressRules();
             loadSSLCertificates();
         } else {
-            const e = await res.json().catch(()=>({error:'Hata'}));
+            const e = await res.json().catch(() => ({ error: 'Hata' }));
             alert('Hata: ' + (e.error || res.status));
         }
     } catch (error) {
@@ -1834,25 +2480,25 @@ async function requestSSL(domain, ruleId = null) {
 // Change SSL certificate
 async function changeSSL(domain, ruleId) {
     if (!authToken) return alert('Önce giriş yapın.');
-    
+
     if (!confirm(`${domain} için SSL sertifikasını değiştirmek istediğinizden emin misiniz?`)) return;
-    
+
     const email = prompt('Yeni sertifika için e-posta adresi:');
     if (!email) return;
-    
+
     try {
         const res = await fetch(`${API_BASE}/ssl/certificates/${domain}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
             body: JSON.stringify({ email, force: true })
         });
-        
+
         if (res.ok) {
             alert('SSL sertifikası başarıyla güncellendi!');
             loadIngressRules();
             loadSSLCertificates();
         } else {
-            const e = await res.json().catch(()=>({error:'Hata'}));
+            const e = await res.json().catch(() => ({ error: 'Hata' }));
             alert('Hata: ' + (e.error || res.status));
         }
     } catch (error) {
@@ -1878,7 +2524,7 @@ function toggleSSLSelection() {
     const sslSelectGroup = document.getElementById('sslSelectGroup');
     const sslNewGroup = document.getElementById('sslNewGroup');
     const dnsGroup = document.getElementById('dnsProviderGroup');
-    
+
     if (sslType === 'select') {
         sslSelectGroup.style.display = 'block';
         sslNewGroup.style.display = 'none';
@@ -1903,7 +2549,7 @@ function toggleDNSProvider() {
     const newSslType = document.querySelector('input[name="new_ssl_type"]:checked')?.value;
     const dnsGroup = document.getElementById('dnsProviderGroup');
     const dnsProvider = document.getElementById('dnsProvider');
-    
+
     if (newSslType === 'wildcard') {
         dnsGroup.style.display = 'block';
         dnsProvider.required = true;
@@ -1921,7 +2567,7 @@ function toggleDNSProvider() {
 function toggleAPIKeyInput() {
     const dnsProvider = document.getElementById('dnsProvider')?.value;
     const warningEl = document.getElementById('heNetWarning');
-    
+
     if (dnsProvider === 'he-net') {
         if (warningEl) warningEl.style.display = 'block';
         const helpEl = document.getElementById('dnsProviderHelp');
@@ -1938,26 +2584,26 @@ async function loadAvailableCertificates(domainOverride) {
     const domainInput = document.querySelector('[name="domain"]');
     const domain = domainOverride || domainInput?.value;
     const certSelect = document.getElementById('sslCertSelect');
-    
+
     if (!domain) {
         certSelect.innerHTML = '<option value="">Önce domain girin</option>';
         return;
     }
-    
+
     try {
         const response = await fetch(`${API_BASE}/ssl/certificates/available/${domain}`, {
             headers: { 'Authorization': `Bearer ${authToken}` }
         });
-        
+
         if (!response.ok) throw new Error('Sertifikalar yüklenemedi');
-        
+
         const certs = await response.json();
-        
+
         if (certs.length === 0) {
             certSelect.innerHTML = '<option value="">Bu domain için uygun sertifika yok</option>';
         } else {
-            certSelect.innerHTML = '<option value="">Seçiniz</option>' + 
-                certs.map(cert => 
+            certSelect.innerHTML = '<option value="">Seçiniz</option>' +
+                certs.map(cert =>
                     `<option value="${cert.id}" data-cert-path="${cert.cert_path}" data-ssl-type="${cert.ssl_type}">
                         ${cert.cert_domain} ${cert.ssl_type === 'wildcard' ? '(Wildcard)' : ''} - ${new Date(cert.expires_at).toLocaleDateString('tr-TR')}
                     </option>`
@@ -1974,9 +2620,9 @@ async function loadAllCertificates() {
         const response = await fetch(`${API_BASE}/ssl/certificates`, {
             headers: { 'Authorization': `Bearer ${authToken}` }
         });
-        
+
         if (!response.ok) throw new Error('Sertifikalar yüklenemedi');
-        
+
         return await response.json();
     } catch (error) {
         console.error('Error loading certificates:', error);
@@ -1987,14 +2633,14 @@ async function loadAllCertificates() {
 // Enhanced DNS Challenge Modal
 async function showDNSChallengeModal(data, requestData) {
     console.log('Showing DNS Challenge Modal with data:', data);
-    
+
     try {
         // Extract domain information
         const domain = data.domain || requestData?.domain || '';
         const baseDomain = domain.replace('*.', '');
         const txtDomain = data.txt_domain || `_acme-challenge.${baseDomain}`;
         const txtValue = data.txt_record || data.txtValue || '';
-        
+
         // Populate modal elements
         const elements = {
             dnsChallengeDomain: document.getElementById('dnsChallengeDomain'),
@@ -2005,12 +2651,12 @@ async function showDNSChallengeModal(data, requestData) {
             dnsChallengeNameDisplay: document.getElementById('dnsChallengeNameDisplay'),
             dnsChallengeValueDisplay: document.getElementById('dnsChallengeValueDisplay')
         };
-        
+
         // Check if all required elements exist
         const missingElements = Object.entries(elements)
             .filter(([key, element]) => !element)
             .map(([key]) => key);
-        
+
         if (missingElements.length > 0) {
             console.error('Missing DNS challenge modal elements:', missingElements);
             // Fallback to alert
@@ -2024,7 +2670,7 @@ Lütfen bu TXT kaydını DNS sağlayıcınıza ekleyin.`;
             alert(alertText);
             return;
         }
-        
+
         // Populate elements
         elements.dnsChallengeDomain.textContent = domain;
         elements.dnsChallengeBaseDomain.textContent = baseDomain;
@@ -2033,7 +2679,7 @@ Lütfen bu TXT kaydını DNS sağlayıcınıza ekleyin.`;
         elements.dnsChallengeValue.value = txtValue;
         if (elements.dnsChallengeNameDisplay) elements.dnsChallengeNameDisplay.textContent = txtDomain;
         if (elements.dnsChallengeValueDisplay) elements.dnsChallengeValueDisplay.textContent = txtValue;
-        
+
         // Store challenge data for retry
         window.lastDNSChallengeData = {
             domain: domain,
@@ -2044,10 +2690,10 @@ Lütfen bu TXT kaydını DNS sağlayıcınıza ekleyin.`;
             lastTxtRecord: txtValue, // Store initial TXT record to detect changes
             session_id: data.session_id || null
         };
-        
+
         // Setup DNS checker
         setupDNSChecker(txtDomain, txtValue);
-        
+
         // Show modal
         const modalElement = document.getElementById('dnsChallengeModal');
         if (modalElement) {
@@ -2080,9 +2726,9 @@ Hata: ${error.message}`;
 // Enhanced SSL error handling with detailed feedback
 async function handleSSLError(data, requestData, isRetry = false) {
     const errorType = data.type || 'UNKNOWN_ERROR';
-    
+
     console.log('Handling SSL error:', { errorType, data, requestData });
-    
+
     switch (errorType) {
         case 'DNS_CHALLENGE':
             if (data.txtDomain && data.txtValue) {
@@ -2098,7 +2744,7 @@ async function handleSSLError(data, requestData, isRetry = false) {
                 showAlert('DNS Challenge gerekli ancak TXT record bilgisi alınamadı: ' + data.error, 'danger');
             }
             break;
-            
+
         case 'CERTBOT_ERROR':
             const certbotMsg = data.error || 'Certbot işlemi başarısız';
             showAlert(`
@@ -2106,15 +2752,15 @@ async function handleSSLError(data, requestData, isRetry = false) {
                 ${certbotMsg}<br>
                 <small class="text-muted">Detaylar için hata raporuna bakın</small>
             `, 'danger', true);
-            
+
             // Show detailed error in console and optionally in modal
             if (data.stdout || data.stderr || data.certbot_output) {
-                console.error('Certbot detailed output:', { 
-                    stdout: data.stdout || data.certbot_output?.stdout, 
+                console.error('Certbot detailed output:', {
+                    stdout: data.stdout || data.certbot_output?.stdout,
                     stderr: data.stderr || data.certbot_output?.stderr,
                     fullOutput: data.certbot_output?.fullOutput
                 });
-                
+
                 // Show debug modal for detailed error
                 if (data.certbot_output?.fullOutput || data.certbot_output?.stderr) {
                     setTimeout(() => {
@@ -2123,7 +2769,7 @@ async function handleSSLError(data, requestData, isRetry = false) {
                 }
             }
             break;
-            
+
         case 'CREDENTIALS_NOT_FOUND':
             const provider = requestData?.dnsProvider || 'DNS provider';
             showAlert(`
@@ -2133,7 +2779,7 @@ async function handleSSLError(data, requestData, isRetry = false) {
             `, 'warning', true);
             setTimeout(() => showCredentialsHelp(provider), 1500);
             break;
-            
+
         case 'CREDENTIALS_PERMISSION_ERROR':
             showAlert(`
                 <strong>Dosya İzin Hatası:</strong><br>
@@ -2141,7 +2787,7 @@ async function handleSSLError(data, requestData, isRetry = false) {
                 <code>chmod 600 /app/config/certbot/creds/*.ini</code> komutunu çalıştırın
             `, 'warning');
             break;
-            
+
         case 'DOMAIN_VALIDATION_ERROR':
             showAlert(`
                 <strong>Domain Doğrulama Hatası:</strong><br>
@@ -2149,7 +2795,7 @@ async function handleSSLError(data, requestData, isRetry = false) {
                 <small class="text-muted">Domain formatını kontrol edin (example.com veya *.example.com)</small>
             `, 'warning');
             break;
-            
+
         case 'RATE_LIMIT_ERROR':
             showAlert(`
                 <strong>Rate Limit Aşıldı:</strong><br>
@@ -2157,7 +2803,7 @@ async function handleSSLError(data, requestData, isRetry = false) {
                 <small class="text-muted">Lütfen bir hafta sonra tekrar deneyin</small>
             `, 'warning');
             break;
-            
+
         case 'NETWORK_ERROR':
             showAlert(`
                 <strong>Ağ Bağlantı Hatası:</strong><br>
@@ -2165,7 +2811,7 @@ async function handleSSLError(data, requestData, isRetry = false) {
                 <small class="text-muted">İnternet bağlantınızı ve firewall ayarlarınızı kontrol edin</small>
             `, 'danger');
             break;
-            
+
         default:
             // Handle manual DNS challenge (common case)
             if (data.requires_manual_dns || data.txt_record) {
@@ -2177,7 +2823,7 @@ async function handleSSLError(data, requestData, isRetry = false) {
                     ${errorMsg}<br>
                     <small class="text-muted">Hata kodu: ${data.code || 'UNKNOWN'}</small>
                 `, 'danger');
-                
+
                 // Log additional context
                 console.error('SSL Error Details:', {
                     errorType,
@@ -2207,7 +2853,7 @@ function showAlert(message, type = 'info', persistent = false) {
         const existingAlerts = document.querySelectorAll(`.alert-custom.alert-${type}`);
         existingAlerts.forEach(alert => alert.remove());
     }
-    
+
     const alertDiv = document.createElement('div');
     alertDiv.className = `alert alert-${type} alert-dismissible fade show alert-custom shadow`;
     alertDiv.style.position = 'fixed';
@@ -2216,13 +2862,13 @@ function showAlert(message, type = 'info', persistent = false) {
     alertDiv.style.zIndex = '9999';
     alertDiv.style.maxWidth = '450px';
     alertDiv.style.minWidth = '300px';
-    
+
     // Add appropriate icon based on type
     const iconHtml = type === 'success' ? '<i class="bi bi-check-circle-fill me-2"></i>' :
-                     type === 'danger' ? '<i class="bi bi-x-circle-fill me-2"></i>' :
-                     type === 'warning' ? '<i class="bi bi-exclamation-triangle-fill me-2"></i>' :
-                     type === 'info' ? '<i class="bi bi-info-circle-fill me-2"></i>' : '';
-    
+        type === 'danger' ? '<i class="bi bi-x-circle-fill me-2"></i>' :
+            type === 'warning' ? '<i class="bi bi-exclamation-triangle-fill me-2"></i>' :
+                type === 'info' ? '<i class="bi bi-info-circle-fill me-2"></i>' : '';
+
     alertDiv.innerHTML = `
         <div class="d-flex align-items-start">
             ${iconHtml}
@@ -2230,9 +2876,9 @@ function showAlert(message, type = 'info', persistent = false) {
             <button type="button" class="btn-close btn-close-white ms-2" onclick="this.parentElement.parentElement.remove()"></button>
         </div>
     `;
-    
+
     document.body.appendChild(alertDiv);
-    
+
     // Auto-remove after different durations based on type
     const duration = type === 'danger' ? 8000 : type === 'warning' ? 6000 : 5000;
     if (!persistent) {
@@ -2258,15 +2904,15 @@ function showSSLProgress(message, type = 'info', showSpinner = true) {
         progressDiv.style.minWidth = '300px';
         document.body.appendChild(progressDiv);
     }
-    
+
     const typeClass = type === 'error' ? 'danger' : type;
-    const spinnerHtml = (showSpinner && type === 'info') ? 
+    const spinnerHtml = (showSpinner && type === 'info') ?
         '<div class="spinner-border spinner-border-sm me-2" role="status"></div>' : '';
-    
+
     const iconHtml = type === 'success' ? '<i class="bi bi-check-circle me-2"></i>' :
-                     type === 'danger' ? '<i class="bi bi-x-circle me-2"></i>' :
-                     type === 'warning' ? '<i class="bi bi-exclamation-triangle me-2"></i>' : '';
-    
+        type === 'danger' ? '<i class="bi bi-x-circle me-2"></i>' :
+            type === 'warning' ? '<i class="bi bi-exclamation-triangle me-2"></i>' : '';
+
     progressDiv.innerHTML = `
         <div class="alert alert-${typeClass} d-flex align-items-center shadow">
             ${spinnerHtml}${iconHtml}
@@ -2274,7 +2920,7 @@ function showSSLProgress(message, type = 'info', showSpinner = true) {
             <button type="button" class="btn-close btn-close-white ms-2" onclick="hideSSLProgress()"></button>
         </div>
     `;
-    
+
     // Auto-hide success/error messages after 5 seconds
     if (type === 'success' || type === 'danger') {
         setTimeout(() => {
@@ -2303,13 +2949,13 @@ function showSSLSteps(currentStep, steps) {
         stepsDiv.style.maxWidth = '350px';
         document.body.appendChild(stepsDiv);
     }
-    
+
     const stepsHtml = steps.map((step, index) => {
         const isActive = index === currentStep;
         const isCompleted = index < currentStep;
         const statusClass = isCompleted ? 'text-success' : isActive ? 'text-primary' : 'text-muted';
         const icon = isCompleted ? 'bi-check-circle-fill' : isActive ? 'bi-arrow-right-circle' : 'bi-circle';
-        
+
         return `
             <div class="d-flex align-items-center mb-2 ${statusClass}">
                 <i class="bi ${icon} me-2"></i>
@@ -2317,7 +2963,7 @@ function showSSLSteps(currentStep, steps) {
             </div>
         `;
     }).join('');
-    
+
     stepsDiv.innerHTML = `
         <div class="card shadow-sm">
             <div class="card-header py-2">
@@ -2377,35 +3023,35 @@ async function checkDNSPropagation(txtDomain, txtValue) {
             <span>DNS yayılımı kontrol ediliyor...</span>
         </div>
     `;
-    
+
     try {
         // Use multiple DNS checkers for better reliability
         const checkers = [
             { name: 'Google DNS', url: `https://dns.google/resolve?name=${txtDomain}&type=TXT` },
             { name: 'Cloudflare DNS', url: `https://cloudflare-dns.com/dns-query?name=${txtDomain}&type=TXT`, headers: { 'Accept': 'application/dns-json' } }
         ];
-        
+
         let foundCorrectRecord = false;
         let checkerResults = [];
-        
+
         for (const checker of checkers) {
             try {
                 const response = await fetch(checker.url, { headers: checker.headers || {} });
                 const data = await response.json();
-                
+
                 if (data.Answer && data.Answer.length > 0) {
                     const txtRecords = data.Answer.filter(record => record.type === 16);
                     const hasCorrectValue = txtRecords.some(record => {
                         const recordData = record.data.replace(/"/g, '');
                         return recordData === txtValue || record.data.includes(txtValue);
                     });
-                    
+
                     checkerResults.push({
                         checker: checker.name,
                         found: hasCorrectValue,
                         records: txtRecords.map(r => r.data)
                     });
-                    
+
                     if (hasCorrectValue) {
                         foundCorrectRecord = true;
                     }
@@ -2424,7 +3070,7 @@ async function checkDNSPropagation(txtDomain, txtValue) {
                 });
             }
         }
-        
+
         // Display results
         if (foundCorrectRecord) {
             statusDiv.innerHTML = `
@@ -2434,7 +3080,7 @@ async function checkDNSPropagation(txtDomain, txtValue) {
                     <small>TXT kaydı DNS sunucularında bulundu. Artık "Tekrar Dene" butonuna basabilirsiniz.</small>
                 </div>
             `;
-            
+
             // Enable retry button if it exists
             const retryBtn = document.querySelector('#dnsChallengeModal .btn-primary');
             if (retryBtn && retryBtn.disabled) {
@@ -2453,7 +3099,7 @@ async function checkDNSPropagation(txtDomain, txtValue) {
                     return `<li>${result.checker}: <span class="text-muted">Bulunamadı</span></li>`;
                 }
             }).join('');
-            
+
             statusDiv.innerHTML = `
                 <div class="alert alert-warning">
                     <i class="bi bi-exclamation-triangle-fill me-2"></i>
@@ -2481,21 +3127,21 @@ function startAutoDNSCheck(txtDomain, txtValue) {
     if (dnsCheckInterval) {
         clearInterval(dnsCheckInterval);
     }
-    
+
     // Show/hide buttons
     const startBtn = document.querySelector('button[onclick*="startAutoDNSCheck"]');
     const stopBtn = document.getElementById('stopDnsCheck');
     if (startBtn) startBtn.style.display = 'none';
     if (stopBtn) stopBtn.style.display = 'inline-block';
-    
+
     // Initial check
     checkDNSPropagation(txtDomain, txtValue);
-    
+
     // Check every 30 seconds
     dnsCheckInterval = setInterval(() => {
         checkDNSPropagation(txtDomain, txtValue);
     }, 30000);
-    
+
     // Show status
     const statusDiv = document.getElementById('dns-status');
     const currentContent = statusDiv.innerHTML;
@@ -2514,13 +3160,13 @@ function stopAutoDNSCheck() {
         clearInterval(dnsCheckInterval);
         dnsCheckInterval = null;
     }
-    
+
     // Show/hide buttons
     const startBtn = document.querySelector('button[onclick*="startAutoDNSCheck"]');
     const stopBtn = document.getElementById('stopDnsCheck');
     if (startBtn) startBtn.style.display = 'inline-block';
     if (stopBtn) stopBtn.style.display = 'none';
-    
+
     // Update status
     const statusDiv = document.getElementById('dns-status');
     const autoStatusEl = statusDiv.querySelector('small.text-info');
@@ -2538,11 +3184,11 @@ function setupCopyButtons() {
     // Add copy functionality to TXT domain and value
     const txtDomainEl = document.getElementById('txtDomain');
     const txtValueEl = document.getElementById('txtValue');
-    
+
     if (txtDomainEl && !txtDomainEl.nextElementSibling?.classList.contains('copy-btn')) {
         addCopyButton(txtDomainEl, 'txtDomain');
     }
-    
+
     if (txtValueEl && !txtValueEl.nextElementSibling?.classList.contains('copy-btn')) {
         addCopyButton(txtValueEl, 'txtValue');
     }
@@ -2554,7 +3200,7 @@ function addCopyButton(element, type) {
     copyBtn.className = 'btn btn-outline-secondary btn-sm ms-2 copy-btn';
     copyBtn.innerHTML = '<i class="bi bi-clipboard"></i>';
     copyBtn.onclick = () => copyTextToClipboard(element.textContent, copyBtn);
-    
+
     element.parentNode.appendChild(copyBtn);
 }
 
@@ -2565,7 +3211,7 @@ async function copyTextToClipboard(text, button) {
         button.innerHTML = '<i class="bi bi-check"></i>';
         button.classList.add('btn-success');
         button.classList.remove('btn-outline-secondary');
-        
+
         setTimeout(() => {
             button.innerHTML = originalHTML;
             button.classList.remove('btn-success');
@@ -2784,3 +3430,296 @@ async function deleteMember(memberId, email) {
     }
 }
 
+// --- Active Connections Monitor ---
+let connectionInterval = null;
+let isConnectionPaused = false;
+let cachedConnectionData = []; // Cache for filtering
+
+function formatBackendName(rawName) {
+    if (!rawName) return '-';
+    // Handle standard pattern: backend_web_example_com
+    if (rawName.startsWith('backend_web_')) {
+        return rawName.replace('backend_web_', '').replace(/_/g, '.') + ' (Web)';
+    }
+    // Handle API/Internal
+    if (rawName === 'api_backend') return 'Yönetim Paneli (API)';
+    if (rawName === 'web_backend') return 'Yönetim Paneli (Web)';
+    if (rawName === 'spoa') return 'ModSecurity Agent';
+    // Handle generic IDs (backend_ID) - Try to resolve from cached rules
+    if (rawName.startsWith('backend_')) {
+        const id = rawName.replace('backend_', '');
+        // Find rule with this ID
+        const rule = cachedRules.find(r => r.id == id);
+        if (rule) {
+            return rule.domain + ' (ID: ' + id + ')';
+        }
+        return 'Kural ID: ' + id;
+    }
+    return rawName;
+}
+
+function clearConnectionFilters() {
+    const srcInput = document.getElementById('conn-filter-src');
+    const beInput = document.getElementById('conn-filter-be');
+    if (srcInput) srcInput.value = '';
+    if (beInput) beInput.value = '';
+    loadConnections(); // Re-render from cache
+}
+
+function showConnectionsModal() {
+    const modal = new window.bootstrap.Modal(document.getElementById('connectionsModal'));
+    modal.show();
+
+    // Reset filters
+    clearConnectionFilters();
+
+    // Start polling immediately
+    isConnectionPaused = false;
+    updateConnectionPauseButton();
+    fetchConnections();
+
+    if (connectionInterval) clearInterval(connectionInterval);
+    connectionInterval = setInterval(() => {
+        if (!isConnectionPaused) fetchConnections();
+    }, 2000); // 2 seconds refresh
+
+    // Stop polling when modal closed
+    document.getElementById('connectionsModal').addEventListener('hidden.bs.modal', function () {
+        if (connectionInterval) clearInterval(connectionInterval);
+        connectionInterval = null;
+    });
+}
+
+function toggleConnectionPause() {
+    isConnectionPaused = !isConnectionPaused;
+    updateConnectionPauseButton();
+}
+
+function updateConnectionPauseButton() {
+    const btn = document.getElementById('btn-pause-connections');
+    if (isConnectionPaused) {
+        btn.innerHTML = '<i class="bi bi-play-fill me-1"></i> <span>Devam Et</span>';
+        btn.classList.replace('btn-outline-warning', 'btn-outline-success');
+    } else {
+        btn.innerHTML = '<i class="bi bi-pause-fill me-1"></i> <span>Durdur</span>';
+        btn.classList.replace('btn-outline-success', 'btn-outline-warning');
+    }
+}
+
+// Fetch data from API
+async function fetchConnections() {
+    try {
+        // Ensure we have rules for naming resolution
+        if (cachedRules.length === 0) {
+            try {
+                const rResponse = await fetch(`${API_BASE}/rules`, { headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {} });
+                if (rResponse.ok) cachedRules = await rResponse.json();
+            } catch (ignore) { }
+        }
+
+        const response = await fetch(`${API_BASE}/ha_sessions`, {
+            headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
+        });
+
+        if (!response.ok) return;
+
+        cachedConnectionData = await response.json();
+        document.getElementById('connection-count-badge').textContent = `${cachedConnectionData.length} Bağlantı`;
+
+        // Render
+        loadConnections();
+
+    } catch (e) {
+        console.error("Load Connections failed", e);
+    }
+}
+
+// Render Table (called by fetch or filter input)
+function loadConnections() {
+    const tbody = document.getElementById('connections-table-body');
+    const srcInput = document.getElementById('conn-filter-src');
+    const beInput = document.getElementById('conn-filter-be');
+
+    // Safety check if inputs exist (in case modal HTML is not updated yet)
+    const filterSrc = srcInput ? srcInput.value.toLowerCase() : '';
+    const filterBe = beInput ? beInput.value.toLowerCase() : '';
+
+    const filtered = cachedConnectionData.filter(s => {
+        const src = (s.src || '').toLowerCase();
+        const beFormatted = formatBackendName(s.be || '').toLowerCase();
+        // Also search in raw backend name
+        const beRaw = (s.be || '').toLowerCase();
+
+        return src.includes(filterSrc) && (beFormatted.includes(filterBe) || beRaw.includes(filterBe));
+    });
+
+    // SORTING: Real users first, System/Internal last
+    filtered.sort((a, b) => {
+        const aIsSystem = (a.src || '').includes('Internal') || (a.src || '').includes('Check');
+        const bIsSystem = (b.src || '').includes('Internal') || (b.src || '').includes('Check');
+
+        if (aIsSystem && !bIsSystem) return 1;  // System goes down
+        if (!aIsSystem && bIsSystem) return -1; // User goes up
+        return 0;
+    });
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">Sonuç bulunamadı</td></tr>';
+        return;
+    }
+
+    // Increased limit to 200 rows
+    tbody.innerHTML = filtered.slice(0, 200).map(s => {
+        const srcIp = s.src ? s.src.split(':')[0] : '-';
+        const duration = s.age || '-';
+        const prettyBackend = formatBackendName(s.be);
+
+        let statusBadge = '<span class="badge bg-success bg-opacity-25 text-success">Active</span>';
+        if (s.src.includes('Internal') || s.src.includes('Check')) statusBadge = '<span class="badge bg-secondary">System</span>';
+
+        return `
+            <tr>
+                <td><span class="font-monospace text-info">${srcIp}</span></td>
+                <td>${s.fe || '-'}</td>
+                <td>
+                    <div class="d-flex flex-column">
+                        <span class="fw-bold text-white" style="font-size: 0.9em;">${prettyBackend}</span>
+                        <span class="text-muted small" style="font-size: 0.75em;">${s.be || '-'}</span>
+                    </div>
+                </td>
+                <td>${duration}</td>
+                <td>${statusBadge}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+// Live Traffic Updates
+let trafficInterval = null;
+
+function startTrafficUpdates() {
+    if (trafficInterval) clearInterval(trafficInterval);
+    updateTrafficStats(); // Initial call
+    trafficInterval = setInterval(updateTrafficStats, 3000); // Update every 3 seconds
+}
+
+async function updateTrafficStats() {
+    // Only update if ingress section is visible
+    if (document.getElementById('ingress-section').style.display === 'none') return;
+
+    try {
+        const response = await fetch(`${API_BASE}/ha_stats`, {
+            headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
+        });
+
+        if (!response.ok) return;
+
+        // Parse CSV
+        const csv = await response.text();
+        const stats = parseStatsCSV(csv);
+
+        // Update each row matching backend name
+        stats.forEach(s => {
+            if (s.svname !== 'BACKEND') return;
+
+            // Backend name is s.pxname (e.g. backend_12)
+            // Find element that has data-backend matching this name
+            const el = document.querySelector(`[data-backend="${s.pxname}"]`);
+
+            if (el) {
+                const statusColor = s.status === 'UP' ? 'success' : 'danger';
+
+                el.innerHTML = `
+                    <div class="d-flex flex-column" style="font-size: 0.8rem">
+                        <div><i class="bi bi-arrow-down text-success"></i> ${formatBytes(s.bin)} <i class="bi bi-arrow-up text-primary"></i> ${formatBytes(s.bout)}</div>
+                        <div class="mt-1">
+                            <span class="badge bg-${statusColor} p-1">${s.status}</span> 
+                            <span>${s.scur} conn (${s.rate}/s)</span>
+                        </div>
+                    </div>
+                `;
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching traffic stats:', error);
+    }
+}
+
+function formatBytes(bytes, decimals = 1) {
+    if (!bytes) return '0 B';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}
+
+// Toggle Auto Renewal
+async function toggleAutoRenew(domain, enabled) {
+    try {
+        await fetch(`${API_BASE}/ssl/certificates/${domain}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({ auto_renew: enabled })
+        });
+        // No alert needed for boolean toggle usually, but can log it
+        console.log(`Auto renew for ${domain} set to ${enabled}`);
+    } catch (error) {
+        console.error('Failed to toggle auto renew:', error);
+        showAlert('Otomatik yenileme durumu güncellenemedi', 'danger');
+        // Revert checkbox state
+        document.getElementById(`ar-${domain}`).checked = !enabled;
+    }
+}
+
+// Manual Renew Trigger
+async function manualRenew(domain) {
+    if (!confirm(`${domain} için sertifika yenileme işlemini başlatmak istiyor musunuz?`)) return;
+
+    // Attempt standard renew first
+    showAlert('Yenileme başlatılıyor...', 'info');
+
+    try {
+        const response = await fetch(`${API_BASE}/ssl/renew/${domain}`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.success) {
+            showAlert('Sertifika başarıyla yenilendi!', 'success');
+            loadSSLCertificates();
+        } else {
+            if (result.type === 'DNS_CHALLENGE' || result.requires_manual_dns) {
+                // Redirect to request flow
+                const confirmManual = confirm(
+                    'Bu sertifika manuel DNS doğrulaması (veya API desteklenmeyen provider) kullanıyor.\n\n' +
+                    'Otomatik yenileme yapılamadı. Yeni bir sertifika talebi oluşturmak ister misiniz?'
+                );
+
+                if (confirmManual) {
+                    showAlert('Lütfen "Sertifika Ekle" butonuna basarak süreci başlatın.', 'warning');
+                }
+            } else {
+                showAlert('Yenileme başarısız: ' + (result.error || result.message), 'danger');
+            }
+        }
+    } catch (error) {
+        console.error('Renew error:', error);
+        showAlert('Yenileme hatası: ' + error.message, 'danger');
+    }
+}
+
+
+
+// --- Initialization ---
+document.addEventListener('DOMContentLoaded', () => {
+    setAuthUI();
+    // Default to stats section (which handles auth check)
+    showSection('stats');
+});

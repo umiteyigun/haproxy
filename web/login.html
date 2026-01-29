@@ -1,30 +1,51 @@
 <!DOCTYPE html>
 <html lang="tr">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Giriş Yap - HAProxy Panel</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { background: #f4f6f9; }
-        .login-card { max-width: 420px; margin: 10vh auto; box-shadow: 0 10px 30px rgba(0,0,0,.08); border: 0; }
-        .brand { font-weight: 700; color: #4f46e5; }
-        .btn-primary { background: linear-gradient(135deg,#667eea,#764ba2); border: none; }
-        .btn-primary:hover { background: linear-gradient(135deg,#764ba2,#667eea); }
+        body {
+            background: #f4f6f9;
+        }
+
+        .login-card {
+            max-width: 420px;
+            margin: 10vh auto;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, .08);
+            border: 0;
+        }
+
+        .brand {
+            font-weight: 700;
+            color: #4f46e5;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border: none;
+        }
+
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #764ba2, #667eea);
+        }
     </style>
-    <script defer src="login.js"></script>
+    <script defer src="login.js?v=2"></script>
     <script>
-      // Prevent FOUC if already logged in
-      document.addEventListener('DOMContentLoaded', () => {
-        const token = localStorage.getItem('token');
-        if (token) window.location.replace('index.html');
-      });
+        // Prevent FOUC if already logged in
+        document.addEventListener('DOMContentLoaded', () => {
+            const token = localStorage.getItem('token');
+            if (token) window.location.replace('index.html');
+        });
     </script>
     <noscript>
-      <meta http-equiv="refresh" content="0; url=index.html">
+        <meta http-equiv="refresh" content="0; url=index.html">
     </noscript>
-    
+
 </head>
+
 <body>
     <div class="container">
         <div class="card login-card">
@@ -49,6 +70,5 @@
         </div>
     </div>
 </body>
+
 </html>
-
-

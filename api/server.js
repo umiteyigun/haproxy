@@ -3,6 +3,7 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const { Pool } = require('pg');
 const fs = require('fs');
+const fsPromises = require('fs').promises;
 const path = require('path');
 const yaml = require('js-yaml');
 const cron = require('node-cron');
@@ -23,6 +24,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const http = require('http');
 const WebSocket = require('ws');
+const HEDNSManager = require('./he-dns-manager');
 const app = express();
 
 const PORT = process.env.PORT || 3000;
@@ -30,21 +32,21 @@ const server = http.createServer(app);
 
 // Enhanced CORS configuration
 const corsOptions = {
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      const allowAll = (process.env.CORS_ALLOW_ALL || 'true').toLowerCase() === 'true';
-      if (allowAll) return callback(null, true);
-      const allowed = (process.env.CORS_ORIGINS || 'http://localhost,http://localhost:80,http://localhost:3000,http://127.0.0.1')
-        .split(',')
-        .map(s => s.trim());
-      if (allowed.includes(origin)) return callback(null, true);
-      return callback(new Error('CORS: Origin not allowed'));
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
-    optionsSuccessStatus: 204,
-    preflightContinue: false
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    const allowAll = (process.env.CORS_ALLOW_ALL || 'true').toLowerCase() === 'true';
+    if (allowAll) return callback(null, true);
+    const allowed = (process.env.CORS_ORIGINS || 'http://localhost,http://localhost:80,http://localhost:3000,http://127.0.0.1')
+      .split(',')
+      .map(s => s.trim());
+    if (allowed.includes(origin)) return callback(null, true);
+    return callback(new Error('CORS: Origin not allowed'));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
+  optionsSuccessStatus: 204,
+  preflightContinue: false
 };
 app.use(cors(corsOptions));
 // Explicitly handle preflight for all routes
@@ -95,9 +97,27 @@ async function initDatabase() {
         active BOOLEAN DEFAULT true,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
+      );
+
+      CREATE TABLE IF NOT EXISTS certificates (
+        id SERIAL PRIMARY KEY,
+        domain VARCHAR(255) NOT NULL UNIQUE,
+        email VARCHAR(255),
+        provider VARCHAR(50),
+        auto_renew BOOLEAN DEFAULT true,
+        expires_at TIMESTAMP,
+        last_check TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS settings (
+        key VARCHAR(255) PRIMARY KEY,
+        value TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
     `);
-    
+
     // Migration: Add new columns if they don't exist
     try {
       await pool.query('ALTER TABLE rules ADD COLUMN IF NOT EXISTS ssl_type VARCHAR(20) DEFAULT \'none\'');
@@ -198,7 +218,7 @@ async function waitForDatabase(maxAttempts = 30, delayMs = 2000) {
 async function generateHAProxyConfig() {
   try {
     const configDir = '/app/config/haproxy';
-    
+
     // Ensure directory exists
     if (!fs.existsSync(configDir)) {
       fs.mkdirSync(configDir, { recursive: true });
@@ -295,13 +315,13 @@ async function generateHAProxyConfig() {
 // Get base HAProxy template with placeholders
 function getBaseTemplate() {
   return `global
-    log stdout local0
+    log host.docker.internal:514 local0
     maxconn 4096
     user haproxy
     group haproxy
     daemon
-    # stats socket /var/run/haproxy/haproxy.sock mode 666 level admin
-    # stats timeout 2m
+    stats socket /app/sockets/haproxy.sock mode 666 level admin expose-fd listeners
+    stats timeout 2m
     ssl-default-bind-ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384
 
 defaults
@@ -328,17 +348,24 @@ frontend http_frontend
     # --- WAF: IP blacklist, rate limiting, and bad user-agent filtering ---
     stick-table type ip size 100k expire 10m store http_req_rate(10s)
     acl waf_blacklisted_ip src -f /usr/local/etc/haproxy/config.d/ip_blacklist.lst
+    acl waf_whitelist src -f /usr/local/etc/haproxy/config.d/whitelist.lst
+    
     http-request track-sc0 src if !letsencrypt-acl
     acl waf_rate_abuse sc_http_req_rate(0) gt 100
     acl waf_bad_user_agent hdr_sub(User-Agent) -f /usr/local/etc/haproxy/maps/bad_useragents.lst
-    http-request deny deny_status 403 if waf_blacklisted_ip !letsencrypt-acl
-    http-request deny deny_status 429 if waf_rate_abuse !letsencrypt-acl
-    http-request deny deny_status 403 if waf_bad_user_agent !letsencrypt-acl
+    
+    http-request deny deny_status 403 if waf_blacklisted_ip !letsencrypt-acl !waf_whitelist
+    http-request deny deny_status 429 if waf_rate_abuse !letsencrypt-acl !waf_whitelist
+    http-request deny deny_status 403 if waf_bad_user_agent !letsencrypt-acl !waf_whitelist
 
     # Dynamic host-based routing (generated by API)
 #DYNAMIC_ACLS#
 #DYNAMIC_HTTP_REDIRECTS#
 #DYNAMIC_RULES#
+    # API Routing
+    acl path_api path_beg /api /auth
+    use_backend api_backend if path_api
+
     use_backend web_backend if letsencrypt-acl
     default_backend web_backend
 
@@ -352,23 +379,36 @@ frontend https_frontend
     filter spoe engine modsecurity config /usr/local/etc/haproxy/modsecurity.conf
 
     stick-table type ip size 100k expire 10m store http_req_rate(10s)
+    
     acl waf_blacklisted_ip src -f /usr/local/etc/haproxy/config.d/ip_blacklist.lst
+    acl waf_whitelist src -f /usr/local/etc/haproxy/config.d/whitelist.lst
+    
     http-request track-sc0 src
     acl waf_rate_abuse sc_http_req_rate(0) gt 100
     acl waf_bad_user_agent hdr_sub(User-Agent) -f /usr/local/etc/haproxy/maps/bad_useragents.lst
-    http-request deny deny_status 403 if waf_blacklisted_ip
-    http-request deny deny_status 429 if waf_rate_abuse
-    http-request deny deny_status 403 if waf_bad_user_agent
+    
+    http-request deny deny_status 403 if waf_blacklisted_ip !waf_whitelist
+    http-request deny deny_status 429 if waf_rate_abuse !waf_whitelist
+    http-request deny deny_status 403 if waf_bad_user_agent !waf_whitelist
 
     # Dynamic host-based routing (generated by API)
 #DYNAMIC_ACLS#
 #DYNAMIC_RULES#
+    # API Routing
+    acl path_api path_beg /api /auth
+    use_backend api_backend if path_api
+
     use_backend web_backend if letsencrypt-acl
     default_backend web_backend
 
 # Backend for Web UI and Let's Encrypt validation (using busybox httpd instead of nginx)
 backend web_backend
     server web haproxy-web:80
+
+# Backend for API (internal only port 3000)
+backend api_backend
+    mode http
+    server api haproxy-api:3000
 
 # Dynamic backends (generated by API)
 #DYNAMIC_BACKENDS#
@@ -399,7 +439,7 @@ async function generateDynamicHAProxyConfig(rules) {
     // Template should have placeholders: #DYNAMIC_ACLS#, #DYNAMIC_RULES#, #DYNAMIC_BACKENDS#
     const templatePath = path.join(__dirname, '../haproxy/haproxy.cfg');
     let baseConfig;
-    
+
     if (fs.existsSync(templatePath)) {
       baseConfig = fs.readFileSync(templatePath, 'utf8');
       // If template has been replaced (has backends), we need a clean template
@@ -414,9 +454,9 @@ async function generateDynamicHAProxyConfig(rules) {
       console.log('Template file not found, using hardcoded template');
       baseConfig = getBaseTemplate();
     }
-    
+
     await hydrateRuleBackends(rules);
-    
+
     // Collect SSL certificates for HTTPS frontend bind
     const sslCertificates = new Set();
     rules.forEach(rule => {
@@ -424,15 +464,15 @@ async function generateDynamicHAProxyConfig(rules) {
         sslCertificates.add(rule.ssl_cert);
       }
     });
-    
+
     // Generate SSL bind statements for HTTPS frontend
     let sslBinds = '';
     if (sslCertificates.size > 0) {
       // Use SNI (Server Name Indication) for multiple certificates
-      const certPaths = Array.from(sslCertificates).map(cert => 
-        `/etc/ssl/certs/haproxy/${cert}`
+      const certPaths = Array.from(sslCertificates).map(cert =>
+        `crt /etc/ssl/certs/haproxy/${cert}`
       ).join(' ');
-      sslBinds = `    bind *:443 ssl crt ${certPaths}\n`;
+      sslBinds = `    bind *:443 ssl ${certPaths}\n`;
     } else {
       // Fallback: use default self-signed cert if no SSL certs (for testing)
       // Check if default cert exists, if not create a generic one
@@ -440,7 +480,7 @@ async function generateDynamicHAProxyConfig(rules) {
       sslBinds = `    bind *:443 ssl crt ${defaultCertPath}\n`;
       sslBinds += `    # Using default self-signed certificate (for testing)\n`;
     }
-    
+
     // Generate ACLs and use_backend rules for frontend
     let frontendACLs = '';
     let frontendRules = '';
@@ -452,16 +492,16 @@ async function generateDynamicHAProxyConfig(rules) {
         return;
       }
 
-        const domainLower = rule.domain.toLowerCase();
-        frontendACLs += `    acl host_${rule.id} hdr(host) -i ${domainLower}\n`;
-        if (rule.path && rule.path !== '/') {
-          // Path specified and not root - use path matching
-          frontendACLs += `    acl path_${rule.id} path_beg ${rule.path}\n`;
-          frontendRules += `    use_backend backend_${rule.id} if host_${rule.id} path_${rule.id}\n`;
-        } else {
-          // No path or root path - match all paths for this domain
-          frontendRules += `    use_backend backend_${rule.id} if host_${rule.id}\n`;
-        }
+      const domainLower = rule.domain.toLowerCase();
+      frontendACLs += `    acl host_${rule.id} hdr(host) -i ${domainLower}\n`;
+      if (rule.path && rule.path !== '/') {
+        // Path specified and not root - use path matching
+        frontendACLs += `    acl path_${rule.id} path_beg ${rule.path}\n`;
+        frontendRules += `    use_backend backend_${rule.id} if host_${rule.id} path_${rule.id}\n`;
+      } else {
+        // No path or root path - match all paths for this domain
+        frontendRules += `    use_backend backend_${rule.id} if host_${rule.id}\n`;
+      }
 
       if (rule.redirect_to_https && rule.ssl_enabled && !processedRedirects.has(rule.id)) {
         processedRedirects.add(rule.id);
@@ -469,7 +509,7 @@ async function generateDynamicHAProxyConfig(rules) {
       }
     });
     console.log('Generated ACLs:', frontendACLs.length, 'chars, Rules:', frontendRules.length, 'chars');
-    
+
     // Generate backends
     let backends = '';
     rules.forEach(rule => {
@@ -496,7 +536,7 @@ async function generateDynamicHAProxyConfig(rules) {
 
       backends += '\n';
     });
-    
+
     // Replace placeholders in base config
     console.log('Replacing placeholders in base config...');
     let dynamicConfig = baseConfig
@@ -505,20 +545,20 @@ async function generateDynamicHAProxyConfig(rules) {
       .replace(/#DYNAMIC_HTTP_REDIRECTS#/g, httpRedirects)
       .replace(/#DYNAMIC_RULES#/g, frontendRules)
       .replace(/#DYNAMIC_BACKENDS#/g, backends);
-    
+
     // Verify replacements
     const remainingPlaceholders = (dynamicConfig.match(/#DYNAMIC_/g) || []).length;
     console.log('Remaining placeholders after replace:', remainingPlaceholders);
-    
+
     // Write to mounted haproxy config file (will be read by haproxy container)
     // This path is mounted from host ./haproxy/haproxy.cfg
     const hostConfigPath = '/app/config/haproxy/haproxy.cfg';
     fs.writeFileSync(hostConfigPath, dynamicConfig);
     console.log('Config written to:', hostConfigPath);
-    
+
     // Also restart HAProxy to apply changes (since include doesn't work)
     console.log('HAProxy config updated, restart required');
-    
+
     console.log('Dynamic HAProxy config generated with', rules.length, 'rules');
   } catch (error) {
     console.error('Error generating dynamic HAProxy config:', error);
@@ -530,7 +570,7 @@ async function reloadHAProxy() {
   try {
     const net = require('net');
     const socketPath = '/app/sockets/haproxy.sock';
-    
+
     // Try socket API first (zero-downtime reload)
     return new Promise((resolve, reject) => {
       const client = net.createConnection(socketPath, () => {
@@ -541,14 +581,14 @@ async function reloadHAProxy() {
         console.log('HAProxy reload command sent via socket (zero-downtime)');
         resolve();
       });
-      
+
       client.on('error', (error) => {
         console.log('Socket connection failed, falling back to container restart...');
         console.error('Socket error:', error.message);
         // Fallback to container restart if socket unavailable
         fallbackRestart().then(resolve).catch(reject);
       });
-      
+
       client.setTimeout(5000, () => {
         console.log('Socket timeout, falling back to container restart...');
         client.destroy();
@@ -565,10 +605,10 @@ async function reloadHAProxy() {
 async function fallbackRestart() {
   try {
     console.log('Restarting HAProxy container via Docker API...');
-    
+
     // Use Docker HTTP API via Unix socket
     const socketPath = '/var/run/docker.sock';
-    
+
     return new Promise((resolve, reject) => {
       // Docker HTTP API: POST /containers/{id}/restart
       const postData = '';
@@ -617,7 +657,7 @@ async function tryExecRestart() {
     const { exec } = require('child_process');
     const util = require('util');
     const execPromise = util.promisify(exec);
-    
+
     console.log('Trying exec method as last resort...');
     // Try using docker command directly (if available in PATH)
     try {
@@ -636,6 +676,69 @@ async function tryExecRestart() {
   }
 }
 
+// Sync certificates from disk to DB
+async function syncCertificates() {
+  try {
+    const diskCerts = await sslManager.listCertificates();
+    for (const cert of diskCerts) {
+      // Upsert into DB
+      const result = await pool.query('SELECT * FROM certificates WHERE domain = $1', [cert.domain]);
+      if (result.rows.length === 0) {
+        // New cert found on disk
+        await pool.query(
+          'INSERT INTO certificates (domain, expires_at) VALUES ($1, $2)',
+          [cert.domain, cert.expires]
+        );
+      } else {
+        // Update expiry
+        await pool.query(
+          'UPDATE certificates SET expires_at = $1, updated_at = NOW() WHERE domain = $2',
+          [cert.expires, cert.domain]
+        );
+      }
+    }
+  } catch (e) {
+    console.error('Certificate sync error:', e);
+  }
+}
+
+// Daily Cron Job for Certificate Renewal
+cron.schedule('0 3 * * *', async () => {
+  console.log('Running daily certificate renewal check...');
+  try {
+    const result = await pool.query('SELECT * FROM certificates WHERE auto_renew = true');
+    const certs = result.rows;
+
+    for (const cert of certs) {
+      // Check expiry (< 30 days)
+      if (cert.expires_at) {
+        const daysUntilExpiry = (new Date(cert.expires_at) - new Date()) / (1000 * 60 * 60 * 24);
+        if (daysUntilExpiry < 30) {
+          console.log(`Certificate for ${cert.domain} excludes in ${daysUntilExpiry.toFixed(1)} days. Attempting renewal...`);
+
+          if (cert.provider === 'manual' || cert.provider === 'he-net') {
+            console.log(`Skipping auto-renewal for ${cert.domain} (Provider: ${cert.provider}) - Manual action required.`);
+            // TODO: Send notification if implementation exists
+          } else {
+            // Attempt auto-renew via certbot
+            // Note: sslManager.renewCertificates() renews ALL efficiently, but we can call it here.
+            // It relies on certbot's internal logic which checks expiry.
+          }
+        }
+      }
+    }
+
+    // Run standard certbot renew (covers all eligible certs)
+    const renewResult = await sslManager.renewCertificates();
+    console.log('Certbot renew result:', renewResult);
+
+    // Re-sync after renewal attempt
+    await syncCertificates();
+
+  } catch (error) {
+    console.error('Daily renewal cron failed:', error);
+  }
+});
 function formatRetryAfterMessage(retryAfter) {
   if (typeof retryAfter === 'number') {
     if (retryAfter < 60) {
@@ -826,7 +929,7 @@ app.get('/api/rules/:id', requireAuth, async (req, res) => {
 // Create ingress rule
 app.post('/api/rules', requireAuth, async (req, res) => {
   try {
-    const {
+    let {
       name,
       domain,
       path,
@@ -852,7 +955,50 @@ app.post('/api/rules', requireAuth, async (req, res) => {
     }
 
     const primary = targets[0];
-    
+
+    // Auto-create DNS record if domain is under HE.net managed zones
+    let dnsCreated = false;
+    if (domain && !domain.startsWith('*')) {
+      try {
+        // Get HE.net credentials from settings
+        const heCredsResult = await pool.query('SELECT value FROM settings WHERE key = $1', ['he_credentials']);
+        if (heCredsResult.rows.length > 0) {
+          const heCreds = JSON.parse(heCredsResult.rows[0].value);
+          const baseDomain = HEDNSManager.getBaseDomain(domain);
+
+          // Check if base domain is managed by HE.net (has wildcard cert)
+          const certCheck = await pool.query(
+            'SELECT * FROM certificates WHERE domain = $1 AND dns_provider = $2',
+            [`*.${baseDomain}`, 'he-net']
+          );
+
+          if (certCheck.rows.length > 0) {
+            console.log(`Auto-creating DNS record for ${domain} on HE.net`);
+            const heManager = new HEDNSManager(heCreds.username, heCreds.password);
+
+            // Get HAProxy public IP (from environment or default)
+            const publicIP = process.env.HAPROXY_PUBLIC_IP || primary.host;
+
+            const dnsResult = await heManager.addARecord(domain, publicIP, baseDomain);
+            dnsCreated = dnsResult.success;
+            console.log(`DNS record created: ${domain} -> ${publicIP}`);
+
+            // Auto-select wildcard SSL if available
+            if (!ssl_enabled && certCheck.rows.length > 0) {
+              ssl_enabled = true;
+              ssl_type = 'wildcard';
+              ssl_cert = certCheck.rows[0].cert_path;
+              dns_provider = 'he-net';
+              console.log(`Auto-selected wildcard SSL for ${domain}`);
+            }
+          }
+        }
+      } catch (dnsError) {
+        console.error('DNS auto-creation failed (continuing anyway):', dnsError.message);
+        // Continue with rule creation even if DNS fails
+      }
+    }
+
     const result = await pool.query(
       `INSERT INTO rules (name, type, domain, path, backend_host, backend_port, ssl_enabled, ssl_type, ssl_cert, dns_provider, lb_mode, redirect_to_https)
        VALUES ($1, 'ingress', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
@@ -876,6 +1022,7 @@ app.post('/api/rules', requireAuth, async (req, res) => {
     await saveRuleBackends(insertedRule.id, targets);
     insertedRule.backends = targets;
     insertedRule.lb_mode = lbMode;
+    insertedRule.dns_auto_created = dnsCreated;
 
     await generateHAProxyConfig();
     res.json(insertedRule);
@@ -914,7 +1061,7 @@ app.put('/api/rules/:id', requireAuth, async (req, res) => {
     }
 
     const primary = targets[0];
-    
+
     const result = await pool.query(
       `UPDATE rules 
        SET name = $1, domain = $2, path = $3, backend_host = $4, backend_port = $5, 
@@ -958,9 +1105,40 @@ app.put('/api/rules/:id', requireAuth, async (req, res) => {
 app.delete('/api/rules/:id', requireAuth, async (req, res) => {
   try {
     const result = await pool.query('DELETE FROM rules WHERE id = $1 RETURNING *', [req.params.id]);
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Rule not found' });
+    }
+
+    const deletedRule = result.rows[0];
+
+    // Auto-delete DNS record if it was auto-created
+    if (deletedRule.domain && !deletedRule.domain.startsWith('*')) {
+      try {
+        // Get HE.net credentials from settings
+        const heCredsResult = await pool.query('SELECT value FROM settings WHERE key = $1', ['he_credentials']);
+        if (heCredsResult.rows.length > 0) {
+          const heCreds = JSON.parse(heCredsResult.rows[0].value);
+          const baseDomain = HEDNSManager.getBaseDomain(deletedRule.domain);
+
+          // Check if base domain is managed by HE.net
+          const certCheck = await pool.query(
+            'SELECT * FROM certificates WHERE domain = $1 AND dns_provider = $2',
+            [`*.${baseDomain}`, 'he-net']
+          );
+
+          if (certCheck.rows.length > 0) {
+            console.log(`Auto-deleting DNS record for ${deletedRule.domain} from HE.net`);
+            const heManager = new HEDNSManager(heCreds.username, heCreds.password);
+
+            const dnsResult = await heManager.deleteARecord(deletedRule.domain, baseDomain);
+            console.log(`DNS record deleted: ${deletedRule.domain}`);
+          }
+        }
+      } catch (dnsError) {
+        console.error('DNS auto-deletion failed (continuing anyway):', dnsError.message);
+        // Continue with rule deletion even if DNS deletion fails
+      }
     }
 
     // Delete config file
@@ -1003,7 +1181,7 @@ app.get('/api/port-forwarding/:id', requireAuth, async (req, res) => {
 app.post('/api/port-forwarding', requireAuth, async (req, res) => {
   try {
     const { name, frontend_port, backend_host, backend_port, protocol } = req.body;
-    
+
     const result = await pool.query(
       `INSERT INTO port_forwarding (name, frontend_port, backend_host, backend_port, protocol)
        VALUES ($1, $2, $3, $4, $5)
@@ -1022,7 +1200,7 @@ app.post('/api/port-forwarding', requireAuth, async (req, res) => {
 app.put('/api/port-forwarding/:id', requireAuth, async (req, res) => {
   try {
     const { name, frontend_port, backend_host, backend_port, protocol, active } = req.body;
-    
+
     const result = await pool.query(
       `UPDATE port_forwarding 
        SET name = $1, frontend_port = $2, backend_host = $3, backend_port = $4, 
@@ -1047,7 +1225,7 @@ app.put('/api/port-forwarding/:id', requireAuth, async (req, res) => {
 app.delete('/api/port-forwarding/:id', requireAuth, async (req, res) => {
   try {
     const result = await pool.query('DELETE FROM port_forwarding WHERE id = $1 RETURNING *', [req.params.id]);
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Rule not found' });
     }
@@ -1250,41 +1428,81 @@ app.delete('/api/ssl/certificates/:certDomain', requireAuth, async (req, res) =>
 // Request SSL certificate (adds to certificate pool)
 app.post('/api/ssl/request', requireAuth, async (req, res) => {
   try {
-    const { domain, email, dnsProvider, assignToRuleId, retry } = req.body;
-    
+    const { domain, email, dnsProvider, he_username, he_password, assignToRuleId, retry } = req.body;
+
     if (!domain || !email) {
-      return res.status(400).json({ error: 'Domain and email are required' });
+      return res.status(400).json({ error: 'Domain ve E-posta adresi zorunludur' });
     }
-    
+
+    // Check for saved credentials if not provided
+    let finalHeUsername = he_username;
+    let finalHePassword = he_password;
+
+    if (dnsProvider === 'he-net') {
+      if (!finalHeUsername || !finalHePassword) {
+        // Try to fetch from settings
+        const savedResult = await pool.query('SELECT value FROM settings WHERE key = \'he_credentials\'');
+        if (savedResult.rows.length > 0) {
+          try {
+            const savedCreds = JSON.parse(savedResult.rows[0].value);
+            if (!finalHeUsername) finalHeUsername = savedCreds.username;
+            if (!finalHePassword) finalHePassword = savedCreds.password;
+          } catch (e) {
+            console.error('Failed to parse saved he_credentials');
+          }
+        }
+      }
+
+      if (!finalHeUsername || !finalHePassword) {
+        return res.status(400).json({ error: 'HE.net için kullanıcı adı ve şifre gereklidir (Kaydedilmiş bilgi bulunamadı)' });
+      }
+
+      // Save credentials for future use
+      try {
+        await pool.query(
+          `INSERT INTO settings (key, value, updated_at) VALUES ('he_credentials', $1, NOW())
+                 ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+          [JSON.stringify({ username: finalHeUsername, password: finalHePassword })]
+        );
+      } catch (e) {
+        console.error('Failed to save he_credentials', e);
+      }
+    }
+
     // If retry is true, check if DNS record exists first
     if (retry) {
       console.log('Retry requested for domain:', domain);
       const baseDomain = domain.startsWith('*.') ? domain.substring(2) : domain;
       const txtDomain = `_acme-challenge.${baseDomain}`;
-      
+
       // Try to verify DNS TXT record exists (simple check)
       // For retry, we'll proceed with certificate request directly
       // Certbot will check DNS and proceed if TXT record is found
       console.log('Retry: Proceeding with certificate request for:', domain);
     }
-    
-    // Note: he-net doesn't have official API, will use manual DNS challenge
+
+    // Note: he-net doesn't have official API, will use manual DNS challenge or acme.sh
     // If retry is true, we'll use a longer timeout and try to continue
-    const result = await sslManager.requestCertificate(domain, email, { dnsProvider, retry: retry || false });
-    
+    const result = await sslManager.requestCertificate(domain, email, {
+      dnsProvider,
+      retry: retry || false,
+      he_username: finalHeUsername,
+      he_password: finalHePassword
+    });
+
     // Log certbot output for debugging
     if (result.stdout || result.stderr) {
       console.log('Certbot output - stdout:', result.stdout);
       console.log('Certbot output - stderr:', result.stderr);
     }
-    
+
     // Check if manual DNS challenge is required
     if (result.type === 'DNS_CHALLENGE') {
       const txtDomain = result.txtDomain || result.txt_domain || (domain.startsWith('*.') ? `_acme-challenge.${domain.substring(2)}` : `_acme-challenge.${domain}`);
       const txtValue = result.txtValue || result.txt_value || '';
       const sessionId = result.details?.sessionId;
 
-      return res.status(202).json({ 
+      return res.status(202).json({
         requires_manual_dns: true,
         txt_domain: txtDomain,
         txt_record: txtValue,
@@ -1298,7 +1516,7 @@ app.post('/api/ssl/request', requireAuth, async (req, res) => {
         }
       });
     }
-    
+
     if (result.success) {
       // Determine certificate filename and type
       const isWildcard = domain.startsWith('*.');
@@ -1306,10 +1524,10 @@ app.post('/api/ssl/request', requireAuth, async (req, res) => {
       const certFileName = certDomain;
       const certPath = `${certFileName}.pem`;
       const sslType = isWildcard ? 'wildcard' : 'normal';
-      
+
       // Get certificate expiry
       const expiry = await sslManager.getCertificateExpiry(domain);
-      
+
       // Add to certificate pool (database)
       const certResult = await pool.query(`
         INSERT INTO certificates (domain, cert_domain, cert_path, ssl_type, dns_provider, email, expires_at)
@@ -1320,20 +1538,20 @@ app.post('/api/ssl/request', requireAuth, async (req, res) => {
           updated_at = CURRENT_TIMESTAMP
         RETURNING *
       `, [domain, certDomain, certPath, sslType, dnsProvider || null, email, expiry]);
-      
+
       // If assignToRuleId is provided, assign certificate to that rule
       if (assignToRuleId) {
         await pool.query(
           `UPDATE rules SET ssl_enabled = true, ssl_cert = $1, ssl_type = $2, dns_provider = $3 WHERE id = $4`,
           [certPath, sslType, dnsProvider || null, assignToRuleId]
         );
-        
+
         // Regenerate HAProxy config
         await generateHAProxyConfig();
       }
-      
-      res.json({ 
-        ...result, 
+
+      res.json({
+        ...result,
         certificate: certResult.rows[0],
         certbot_output: {
           stdout: result.stdout || '',
@@ -1356,7 +1574,7 @@ app.post('/api/ssl/request', requireAuth, async (req, res) => {
           }
         });
       }
-      
+
       res.status(500).json({
         ...result,
         certbot_output: {
@@ -1371,46 +1589,75 @@ app.post('/api/ssl/request', requireAuth, async (req, res) => {
   }
 });
 
+// Settings API
+app.get('/api/settings/:key', requireAuth, async (req, res) => {
+  try {
+    const { key } = req.params;
+    const result = await pool.query('SELECT value FROM settings WHERE key = $1', [key]);
+    if (result.rows.length === 0) {
+      return res.json({ value: null });
+    }
+    res.json({ value: result.rows[0].value });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/settings/:key', requireAuth, async (req, res) => {
+  try {
+    const { key } = req.params;
+    const { value } = req.body;
+    await pool.query(
+      `INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, NOW())
+             ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+      [key, value]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Update/Change SSL certificate for a domain
 app.put('/api/ssl/certificates/:domain', requireAuth, async (req, res) => {
   try {
     const { domain } = req.params;
     const { email, dnsProvider, force } = req.body;
-    
+
     if (!email) {
       return res.status(400).json({ error: 'Email is required' });
     }
-    
+
     // Find rule for this domain
     const ruleResult = await pool.query('SELECT * FROM rules WHERE domain = $1 AND ssl_enabled = true', [domain]);
     if (ruleResult.rows.length === 0) {
       return res.status(404).json({ error: 'No SSL-enabled rule found for this domain' });
     }
-    
+
     const rule = ruleResult.rows[0];
     const isWildcard = rule.ssl_type === 'wildcard';
     const sslDomain = isWildcard ? `*.${domain}` : domain;
     const dnsProviderToUse = dnsProvider || rule.dns_provider;
-    
+
     // Request new certificate
-    const result = await sslManager.requestCertificate(sslDomain, email, { 
+    const result = await sslManager.requestCertificate(sslDomain, email, {
       dnsProvider: dnsProviderToUse,
-      force: force || false 
+      force: force || false
     });
-    
+
     if (result.success) {
       const certFileName = isWildcard ? domain : domain;
       const certPath = `${certFileName}.pem`;
-      
+
       // Update rule with new certificate
       await pool.query(
         `UPDATE rules SET ssl_cert = $1, updated_at = CURRENT_TIMESTAMP WHERE domain = $2`,
         [certPath, domain]
       );
-      
+
       // Regenerate HAProxy config
       await generateHAProxyConfig();
-      
+
       res.json({ ...result, message: 'SSL certificate updated successfully' });
     } else {
       res.status(500).json(result);
@@ -1572,7 +1819,66 @@ app.post('/api/ssl/continue', requireAuth, async (req, res) => {
   }
 });
 
-// Renew SSL certificates
+// SSL Certificates - List
+app.get('/api/ssl/certificates', requireAuth, async (req, res) => {
+  try {
+    // 1. Get real certificates from disk
+    const diskCerts = await sslManager.listCertificates();
+
+    // 2. Get DB metadata
+    const dbCerts = await pool.query('SELECT * FROM certificates');
+    const dbMap = new Map(dbCerts.rows.map(c => [c.domain, c]));
+
+    // 3. Merge
+    const merged = diskCerts.map(d_cert => {
+      const db_cert = dbMap.get(d_cert.domain) || {};
+      return {
+        ...d_cert,
+        auto_renew: db_cert.auto_renew !== false, // default true
+        provider: db_cert.provider || db_cert.dns_provider || 'manual',
+        email: db_cert.email
+      };
+    });
+
+    res.json(merged);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update SSL Certificate Settings (Auto Renew toggle)
+app.put('/api/ssl/certificates/:domain', requireAuth, async (req, res) => {
+  try {
+    const { domain } = req.params;
+    const { auto_renew } = req.body;
+
+    // Upsert
+    await pool.query(`
+            INSERT INTO certificates (domain, auto_renew)
+            VALUES ($1, $2)
+            ON CONFLICT (domain) DO UPDATE SET
+            auto_renew = $2,
+            updated_at = NOW()
+        `, [domain, auto_renew]);
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/ssl/renew/:domain', requireAuth, async (req, res) => {
+  try {
+    const { domain } = req.params;
+    // Trigger manual renewal attempt
+    // Ideally reuse sslManager.renewCertificates logic but filtered for one domain
+    // For now, running general renew is safe as it skips non-expiring certs
+    const result = await sslManager.renewCertificates();
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 app.post('/api/ssl/renew', requireAuth, async (req, res) => {
   try {
     const result = await sslManager.renewCertificates();
@@ -1689,7 +1995,7 @@ async function startServer() {
   await waitForDatabase();
   await initDatabase();
   await generateHAProxyConfig();
-  
+
   // Schedule config regeneration every 5 minutes
   cron.schedule('*/5 * * * *', async () => {
     await generateHAProxyConfig();
@@ -1705,14 +2011,14 @@ async function startServer() {
   app.post('/api/ssl/debug', requireAuth, async (req, res) => {
     try {
       const { domain, email, dnsProvider, retry } = req.body;
-      
+
       if (!domain || !email) {
         return res.status(400).json({ error: 'Domain and email are required' });
       }
-      
+
       const baseDomain = domain.startsWith('*.') ? domain.substring(2) : domain;
       let command;
-      
+
       const baseCertbotCmd = `certbot certonly --manual \
           --config-dir ${sslManager.certbotDir} \
           --work-dir ${sslManager.certbotWorkDir} \
@@ -1724,18 +2030,18 @@ async function startServer() {
           --keep-until-expiring \
           -d ${domain} \
           -d ${baseDomain}`;
-      
+
       if (retry) {
         command = `yes "" | timeout 120 ${baseCertbotCmd}`;
       } else {
         command = baseCertbotCmd;
       }
-      
+
       console.log('Debug: Running Certbot command:', command);
-      
+
       // Execute in certbot container and get full output
       const result = await sslManager.executeInCertbotContainer(command, 120000);
-      
+
       return res.json({
         success: true,
         command: command,
@@ -1747,21 +2053,21 @@ async function startServer() {
       });
     } catch (error) {
       console.error('Debug endpoint error:', error);
-      return res.status(500).json({ 
+      return res.status(500).json({
         error: error.message,
-        stack: error.stack 
+        stack: error.stack
       });
     }
   });
-  
+
   // WebSocket server for terminal access
   const wss = new WebSocket.Server({ server, path: '/ws/terminal' });
-  
+
   wss.on('connection', (ws, req) => {
     console.log('Terminal WebSocket connection established');
 
     const token = new URL(req.url, 'http://localhost').searchParams.get('token') ||
-                  req.headers.authorization?.replace('Bearer ', '');
+      req.headers.authorization?.replace('Bearer ', '');
 
     if (!token) {
       ws.close(1008, 'Authentication required');
@@ -1780,10 +2086,343 @@ async function startServer() {
   });
 }
 
+const net = require('net');
+
+// Generic HAProxy Socket Command Runner
+function runHAProxyCommand(command) {
+  return new Promise((resolve, reject) => {
+    const client = net.createConnection(process.env.HAPROXY_SOCKET || '/app/sockets/haproxy.sock');
+    let data = '';
+
+    client.setTimeout(2000); // Timeout
+    client.on('timeout', () => { client.destroy(); reject(new Error('Socket timeout')); });
+
+    client.on('connect', () => {
+      client.write(command + '\n');
+    });
+
+    client.on('data', (chunk) => { data += chunk.toString(); });
+
+    client.on('end', () => { resolve(data); });
+
+    client.on('error', (err) => { client.destroy(); reject(err); });
+  });
+}
+
+// --- High Performance Stats Caching ---
+let cachedStats = null;
+let lastCacheUpdate = 0;
+
+// Poll stats every 1000ms automatically
+setInterval(async () => {
+  try {
+    const data = await runHAProxyCommand('show stat');
+    if (data && data.length > 100) {
+      cachedStats = data;
+      lastCacheUpdate = Date.now();
+    }
+  } catch (e) {
+    // Silent fail
+  }
+}, 1000);
+
+app.get('/api/ha_stats', requireAuth, async (req, res) => {
+  // Return cached data immediately (0 latency)
+  if (cachedStats) {
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('X-Stats-Age', Date.now() - lastCacheUpdate); // Monitoring header
+    return res.send(cachedStats);
+  }
+
+  // Fallback: If cache is empty (cold start), try fetch once
+  try {
+    const statsCsv = await runHAProxyCommand('show stat');
+    cachedStats = statsCsv; // Update cache
+    res.setHeader('Content-Type', 'text/csv');
+    res.send(statsCsv);
+  } catch (error) {
+    console.error('Stats Socket Error:', error.message);
+    res.status(500).json({ error: 'Failed to fetch stats' });
+  }
+});
+
+// GET /api/ha_sessions - Live Sessions (Raw)
+app.get('/api/ha_sessions', requireAuth, async (req, res) => {
+  try {
+    const output = await runHAProxyCommand('show sess');
+    // DEBUG LOGGING
+    console.log(`[DEBUG] Session Raw Output Length: ${output.length}`);
+
+    const lines = output.trim().split('\n');
+    console.log(`[DEBUG] Raw Lines Count: ${lines.length}`);
+    if (lines.length > 0) {
+      console.log(`[DEBUG] First Line Sample: ${lines[0]}`);
+    }
+
+    const sessions = lines.map(line => {
+      const parts = {};
+      line.trim().split(/\s+/).forEach(p => {
+        const kv = p.split('=');
+        if (kv.length === 2) parts[kv[0]] = kv[1];
+      });
+
+      // Log if src is missing (filtering reason)
+      if (!parts.src) {
+        // If src is missing, it's usually Health Checks or Internal Stats
+        parts.src = 'Sistem (Internal/Check)';
+        if (!parts.fe) parts.fe = 'Local';
+        if (!parts.be) parts.be = '-';
+      }
+      return parts;
+    }).filter(s => Object.keys(s).length > 2); // Keep if at least some fields parsed
+
+    console.log(`[DEBUG] Successfully Parsed Sessions: ${sessions.length}`);
+    res.json(sessions);
+  } catch (error) {
+    console.error('Session Socket Error:', error.message);
+    res.status(500).json({ error: 'Failed to fetch sessions' });
+  }
+});
+
+// Debug Endpoint for NAT/IP issues
+app.get('/api/debug-headers', (req, res) => {
+  res.json({
+    canli_baglanti_ip: req.socket.remoteAddress,
+    x_forwarded_for: req.headers['x-forwarded-for'],
+    x_real_ip: req.headers['x-real-ip'],
+    tum_basliklar: req.headers
+  });
+});
+
 startServer().then(() => {
+  // --- Security & Guard API Integration ---
+
+  // GET /api/security/bans - List banned IPs from Guard
+  app.get('/api/security/bans', requireAuth, async (req, res) => {
+    try {
+      // Guard API runs on host:5005
+      const response = await fetch('http://host.docker.internal:5005/bans');
+      if (!response.ok) throw new Error(`Guard API returned ${response.status}`);
+      const data = await response.json();
+      res.json(data);
+    } catch (err) {
+      console.error("Guard API Error (List Bans):", err.message);
+      // Fallback: return empty list if guard is down so UI doesn't crash
+      res.status(503).json({ error: 'Security service unavailable', bans: [] });
+    }
+  });
+
+  // POST /api/security/unban - Unban an IP via Guard
+  app.post('/api/security/unban', requireAuth, async (req, res) => {
+    try {
+      const { ip } = req.body;
+      if (!ip) return res.status(400).json({ error: 'IP address is required' });
+
+      const response = await fetch('http://host.docker.internal:5005/unban', {
+        method: 'POST',
+        body: JSON.stringify({ ip }),
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (!response.ok) throw new Error(`Guard API returned ${response.status}`);
+      const data = await response.json();
+      res.json(data);
+    } catch (err) {
+      console.error("Guard API Error (Unban):", err.message);
+      res.status(503).json({ error: 'Security service unavailable' });
+    }
+  });
+
+  // --- Whitelist Management ---
+
+  // GET /api/security/whitelist
+  app.get('/api/security/whitelist', requireAuth, async (req, res) => {
+    try {
+      const response = await fetch('http://host.docker.internal:5005/whitelist');
+      if (!response.ok) throw new Error('Guard API Error');
+      const data = await response.json();
+      res.json(data);
+    } catch (err) {
+      console.error("Guard API Error (Whitelist):", err.message);
+      res.status(503).json({ whitelist: [] });
+    }
+  });
+
+  // POST /api/security/whitelist (Add)
+  app.post('/api/security/whitelist', requireAuth, async (req, res) => {
+    try {
+      const response = await fetch('http://host.docker.internal:5005/whitelist', {
+        method: 'POST',
+        body: JSON.stringify(req.body),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await response.json();
+      res.json(data);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/security/unwhitelist (Remove)
+  app.post('/api/security/unwhitelist', requireAuth, async (req, res) => {
+    try {
+      const response = await fetch('http://host.docker.internal:5005/unwhitelist', {
+        method: 'POST',
+        body: JSON.stringify(req.body),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await response.json();
+      res.json(data);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- WAF (ModSecurity) Rules Management ---
+  const WAF_RULES_DIR = '/app/config/modsecurity-rules';
+
+  // GET /api/waf/rules - List all rule files
+  app.get('/api/waf/rules', requireAuth, async (req, res) => {
+    try {
+      const files = await fsPromises.readdir(WAF_RULES_DIR);
+      const ruleFiles = [];
+
+      for (const file of files) {
+        if (file.endsWith('.conf')) {
+          const filePath = path.join(WAF_RULES_DIR, file);
+          const stats = await fsPromises.stat(filePath);
+          const content = await fsPromises.readFile(filePath, 'utf-8');
+          const ruleCount = (content.match(/SecRule/gi) || []).length;
+
+          ruleFiles.push({
+            name: file,
+            size: stats.size,
+            modified: stats.mtime,
+            ruleCount
+          });
+        }
+      }
+
+      res.json({ rules: ruleFiles });
+    } catch (err) {
+      if (err.code === 'ENOENT') {
+        res.json({ rules: [] });
+      } else {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  });
+
+  // GET /api/waf/rules/:filename - Get rule file content
+  app.get('/api/waf/rules/:filename', requireAuth, async (req, res) => {
+    try {
+      const filename = req.params.filename;
+      if (!filename.endsWith('.conf') || filename.includes('/') || filename.includes('..')) {
+        return res.status(400).json({ error: 'Invalid filename' });
+      }
+
+      const filePath = path.join(WAF_RULES_DIR, filename);
+      const content = await fsPromises.readFile(filePath, 'utf-8');
+      res.json({ filename, content });
+    } catch (err) {
+      if (err.code === 'ENOENT') {
+        res.status(404).json({ error: 'File not found' });
+      } else {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  });
+
+  // PUT /api/waf/rules/:filename - Update rule file
+  app.put('/api/waf/rules/:filename', requireAuth, async (req, res) => {
+    try {
+      const filename = req.params.filename;
+      const { content } = req.body;
+
+      if (!filename.endsWith('.conf') || filename.includes('/') || filename.includes('..')) {
+        return res.status(400).json({ error: 'Invalid filename' });
+      }
+      if (typeof content !== 'string') {
+        return res.status(400).json({ error: 'Content is required' });
+      }
+
+      const filePath = path.join(WAF_RULES_DIR, filename);
+      await fsPromises.writeFile(filePath, content, 'utf-8');
+      res.json({ status: 'updated', filename });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/waf/rules - Create new rule file
+  app.post('/api/waf/rules', requireAuth, async (req, res) => {
+    try {
+      const { filename, content } = req.body;
+
+      if (!filename || !filename.endsWith('.conf')) {
+        return res.status(400).json({ error: 'Filename must end with .conf' });
+      }
+      if (filename.includes('/') || filename.includes('..')) {
+        return res.status(400).json({ error: 'Invalid filename' });
+      }
+
+      const filePath = path.join(WAF_RULES_DIR, filename);
+
+      // Check if exists
+      try {
+        await fsPromises.access(filePath);
+        return res.status(409).json({ error: 'File already exists' });
+      } catch (e) {
+        // File doesn't exist, good
+      }
+
+      await fsPromises.writeFile(filePath, content || '# Custom WAF Rules\n', 'utf-8');
+      res.json({ status: 'created', filename });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // DELETE /api/waf/rules/:filename - Delete rule file
+  app.delete('/api/waf/rules/:filename', requireAuth, async (req, res) => {
+    try {
+      const filename = req.params.filename;
+
+      if (!filename.endsWith('.conf') || filename.includes('/') || filename.includes('..')) {
+        return res.status(400).json({ error: 'Invalid filename' });
+      }
+
+      const filePath = path.join(WAF_RULES_DIR, filename);
+      await fsPromises.unlink(filePath);
+      res.json({ status: 'deleted', filename });
+    } catch (err) {
+      if (err.code === 'ENOENT') {
+        res.status(404).json({ error: 'File not found' });
+      } else {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  });
+
+  // POST /api/waf/reload - Reload SPOA container
+  app.post('/api/waf/reload', requireAuth, async (req, res) => {
+    try {
+      const { exec } = require('child_process');
+      exec('docker restart haproxy-spoa', (error, stdout, stderr) => {
+        if (error) {
+          return res.status(500).json({ error: stderr || error.message });
+        }
+        res.json({ status: 'reloaded', message: 'SPOA container restarted' });
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Start Server
   server.listen(PORT, () => {
     console.log(`HAProxy Management API running on port ${PORT}`);
-  });
+  }).setTimeout(300000); // 5 minutes timeout for long running SSL requests
 }).catch((error) => {
   console.error('Failed to start server', error);
   process.exit(1);

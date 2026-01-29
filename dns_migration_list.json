@@ -1,0 +1,214 @@
+[
+    {
+        "domain": "adhbsui.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "api.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "apisemp.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "app.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "aracyonetim.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "aracyonetimapi.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "benimlegulumse.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "biosign.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "cihaztakip.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "cmsdemo.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "demofakulte.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "dhbs.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "disklinik.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "disunit.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "dockerhub.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "ebb.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "engelli.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "fakultedemo.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "form.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "hbys.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "hbysdemo.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "ik.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "katalog.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "kavisayarlar.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "kavisenvanter.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "kdhbs.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "kdhbsapi.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "konfigurasyon.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "kurumsalapi.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "kuwaitdental.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "meetup.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "mersinadsh.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "mobilapi.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "nottakipsistemi.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "nuget.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "ozeldis.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "projeyonetim.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "satinalma.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "semp.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "sms.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "sorucevap.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "token.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "uzaktanegitim.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "uzkdemo.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "vatanhst.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "webhbys.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "webhbysapi.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "webhbysdev.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "webhbysjsonserver.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "webhbystest.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "webhbystestapi.trtekyazilim.com",
+        "target": "192.168.200.212"
+    },
+    {
+        "domain": "www.ik.trtekyazilim.com",
+        "target": "192.168.200.212"
+    }
+]

@@ -8,7 +8,17 @@ RUN apk add --no-cache \
         bash \
         curl \
         expect \
-        openssl
+        openssl \
+        certbot-dns-cloudflare \
+        certbot-dns-digitalocean \
+        certbot-dns-route53 \
+        certbot-dns-google \
+        certbot-dns-ovh \
+        socat
+
+# Install acme.sh
+RUN curl https://get.acme.sh | sh && \
+        ln -s /root/.acme.sh/acme.sh /usr/local/bin/acme.sh
 
 WORKDIR /app
 

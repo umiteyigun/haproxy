@@ -278,10 +278,15 @@ class SSLManager {
       const timer = setTimeout(() => {
         if (finished) return;
         finished = true;
-        try { child.kill('SIGTERM'); } catch (_) {}
+        try { child.kill('SIGTERM'); } catch (_) { }
         resolve({ stdout, stderr, exitCode: -1, timeout: true });
       }, timeoutMs);
     });
+  }
+
+  async executeShellCommand(command, timeoutMs = 300000) {
+    // Wrapper for consistency - we are running in the same container
+    return this.executeInCertbotContainer(command, timeoutMs);
   }
 
   async startManualDNSSession(domain, baseDomain, email, dnsProvider = null) {
@@ -347,7 +352,7 @@ class SSLManager {
       return { sessionId, sessionDir, challenge };
     } catch (error) {
       Logger.error('Manual DNS challenge did not produce challenge file', { domain, sessionId, error: error.message });
-      try { child.kill('SIGTERM'); } catch (_) {}
+      try { child.kill('SIGTERM'); } catch (_) { }
       this.manualSessions.delete(domain);
       throw error;
     }
@@ -390,7 +395,7 @@ class SSLManager {
           logOutput = await fs.promises.readFile(logPath, 'utf8');
         }
 
-        try { session.process?.kill('SIGTERM'); } catch (_) {}
+        try { session.process?.kill('SIGTERM'); } catch (_) { }
         this.manualSessions.delete(domain);
 
         const exitCode = result.exitCode ?? result.exit_code ?? 1;
@@ -479,49 +484,107 @@ class SSLManager {
 
       if (isWildcard) {
         const providerKey = dnsProvider || 'he-net';
-        const pluginMap = {
-          'he-net': null,
-          'cloudflare': 'cloudflare',
-          'route53': 'route53',
-          'digitalocean': 'digitalocean',
-          'godaddy': 'godaddy'
-        };
-        const pluginName = pluginMap[providerKey] || null;
 
-        if (!pluginName) {
-          const manual = await this.startManualDNSSession(domain, baseDomain, email, providerKey);
-          const challenge = manual.challenge || {};
+        // Handle HE.net via acme.sh
+        if (providerKey === 'he-net') {
+          if (!options.he_username || !options.he_password) {
+            throw new Error('HE.net credentials missing (username and password/key required)');
+          }
 
-          throw new DNSChallengeError(
-            'Manual DNS challenge required',
-            challenge.txt_domain,
-            challenge.txt_value,
-            {
-              domain,
-              baseDomain,
-              dnsProvider: providerKey,
-              sessionId: manual.sessionId
+          Logger.info('Using acme.sh for HE.net', { domain, baseDomain });
+
+          // Export credentials
+          // CRITICAL: Unset LOG_LEVEL to avoid integer expression errors in acme.sh
+          const envVars = `unset LOG_LEVEL && export HE_Username="${options.he_username}" && export HE_Password="${options.he_password}"`;
+
+          // Issue command - Use bash explicitly to avoid Alpine/sh compatibility issues
+          let acmeCmd = `${envVars} && /bin/bash /usr/local/bin/acme.sh --issue --dns dns_he -d "${domain}" -d "${baseDomain}" --server letsencrypt`;
+
+          if (options.force) {
+            acmeCmd += ' --force';
+          }
+
+          let issueResult;
+          try {
+            issueResult = await this.executeShellCommand(acmeCmd, 300 * 1000);
+          } catch (error) {
+            // acme.sh returns 2 if certificate is already issued and valid (Skipped)
+            if (error.exitCode === 2) {
+              Logger.info('acme.sh skipped issuance (already valid)', { domain });
+              issueResult = { stdout: error.stdout, stderr: error.stderr, exitCode: 2 };
+            } else {
+              throw error;
             }
-          );
+          }
+
+          // 0 = success, 2 = skipped (already issued)
+          if (issueResult.exitCode !== 0 && issueResult.exitCode !== 2) {
+            throw new CertbotError('acme.sh issue failed', issueResult.stdout, issueResult.stderr, issueResult.exitCode);
+          }
+
+          // Install command (copy to haproxy certs)
+          const certDir = path.join(this.certsDir, baseDomain);
+          this.ensureDir(certDir);
+
+          // Use the primary domain (domain variable) for installation reference
+          const installCmd = `/bin/bash /usr/local/bin/acme.sh --install-cert -d "${domain}" \
+                --key-file       "${path.join(certDir, 'privkey.pem')}"  \
+                --fullchain-file "${path.join(certDir, 'fullchain.pem')}"`;
+
+          const installResult = await this.executeShellCommand(installCmd, 60 * 1000);
+          if (installResult.exitCode !== 0) {
+            throw new CertbotError('acme.sh install failed', installResult.stdout, installResult.stderr, installResult.exitCode);
+          }
+
+          stdout = issueResult.stdout + '\n' + installResult.stdout;
+          stderr = issueResult.stderr + '\n' + installResult.stderr;
+
+        } else {
+          // ... existing certbot logic for other providers ...
+          const pluginMap = {
+            'cloudflare': 'cloudflare',
+            'route53': 'route53',
+            'digitalocean': 'digitalocean',
+            'godaddy': 'godaddy'
+          };
+          const pluginName = pluginMap[providerKey] || null;
+
+          if (!pluginName) {
+            const manual = await this.startManualDNSSession(domain, baseDomain, email, providerKey);
+            const challenge = manual.challenge || {};
+
+            throw new DNSChallengeError(
+              'Manual DNS challenge required',
+              challenge.txt_domain,
+              challenge.txt_value,
+              {
+                domain,
+                baseDomain,
+                dnsProvider: providerKey,
+                sessionId: manual.sessionId
+              }
+            );
+          }
+
+          const credentialsPath = path.join(this.credsDir, `${providerKey}.ini`);
+          const command = `certbot certonly --dns-${pluginName} \
+              --config-dir ${this.certbotDir} \
+              --work-dir ${this.certbotWorkDir} \
+              --logs-dir ${this.certbotLogsDir} \
+              --dns-${pluginName}-credentials ${credentialsPath} \
+              --email ${email} \
+              --agree-tos \
+              --no-eff-email \
+              --keep-until-expiring \
+              -d ${domain} \
+              -d ${baseDomain}`;
+
+          const result = await this.executeInCertbotContainer(command, 300000);
+          stdout = result.stdout || '';
+          stderr = result.stderr || '';
         }
-
-        const credentialsPath = path.join(this.credsDir, `${providerKey}.ini`);
-        const command = `certbot certonly --dns-${pluginName} \
-          --config-dir ${this.certbotDir} \
-          --work-dir ${this.certbotWorkDir} \
-          --logs-dir ${this.certbotLogsDir} \
-          --dns-${pluginName}-credentials ${credentialsPath} \
-          --email ${email} \
-          --agree-tos \
-          --no-eff-email \
-          --keep-until-expiring \
-          -d ${domain} \
-          -d ${baseDomain}`;
-
-        const result = await this.executeInCertbotContainer(command, 300000);
-        stdout = result.stdout || '';
-        stderr = result.stderr || '';
       } else {
+        // ... existing webroot logic ...
         const command = `certbot certonly --webroot \
           --config-dir ${this.certbotDir} \
           --work-dir ${this.certbotWorkDir} \
@@ -689,9 +752,31 @@ class SSLManager {
 
   async renewCertificates() {
     try {
-      const command = `certbot renew --quiet --config-dir ${this.certbotDir} --work-dir ${this.certbotWorkDir} --logs-dir ${this.certbotLogsDir}`;
-      const result = await this.executeInCertbotContainer(command, 300000);
+      const results = { stdout: '', stderr: '' };
 
+      // 1. Run Certbot Renew
+      try {
+        const command = `certbot renew --quiet --config-dir ${this.certbotDir} --work-dir ${this.certbotWorkDir} --logs-dir ${this.certbotLogsDir}`;
+        const result = await this.executeInCertbotContainer(command, 300000);
+        results.stdout += `\nCertbot:\n${result.stdout}`;
+        results.stderr += `\nCertbot stderr:\n${result.stderr}`;
+      } catch (err) {
+        Logger.error('Certbot renewal failed', { error: err.message });
+      }
+
+      // 2. Run acme.sh Renew (Cron mode)
+      try {
+        // Using bash and explicit home to be safe
+        const acmeCmd = `/bin/bash /usr/local/bin/acme.sh --cron --home /root/.acme.sh`;
+        const acmeResult = await this.executeShellCommand(acmeCmd, 300000);
+        results.stdout += `\nacme.sh:\n${acmeResult.stdout}`;
+        results.stderr += `\nacme.sh stderr:\n${acmeResult.stderr}`;
+      } catch (err) {
+        // acme.sh returns 0 on success (even if nothing renewed) or if renewal suceeded
+        Logger.error('acme.sh renewal failed', { error: err.message });
+      }
+
+      // 3. Update HAProxy certificates
       const certificates = await this.listCertificates();
       for (const cert of certificates) {
         try {
@@ -704,19 +789,18 @@ class SSLManager {
       return {
         success: true,
         message: 'Sertifikalar yenilendi',
-        stdout: result.stdout,
-        stderr: result.stderr
+        stdout: results.stdout,
+        stderr: results.stderr
       };
     } catch (error) {
       Logger.error('Certificate renewal error', { error: error.message });
       return {
         success: false,
-        error: error.message,
-        type: error.code || 'RENEW_ERROR',
-        details: error.details || null
+        error: error.message
       };
     }
   }
+
 }
 
 module.exports = SSLManager;

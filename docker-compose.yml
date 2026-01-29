@@ -6,15 +6,18 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "8404:8404"  # HAProxy stats
+      - "127.0.0.1:8404:8404" # HAProxy stats (localhost only)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:rw
       - ./haproxy/config.d:/usr/local/etc/haproxy/config.d:ro
       - ./haproxy/maps:/usr/local/etc/haproxy/maps:ro
       - ./haproxy/modsecurity.conf:/usr/local/etc/haproxy/modsecurity.conf:ro
       - ./haproxy/certs:/etc/ssl/certs/haproxy:ro
-      - ./haproxy/sockets:/var/run/haproxy
-      - ./logs/haproxy:/var/log/haproxy
+      - ./haproxy/certs:/usr/local/etc/haproxy/certs:ro
+      - ./logs/haproxy:/var/log/haproxy:rw
+      - ./haproxy/sockets:/app/sockets:rw
     depends_on:
       - api
       - spoa
@@ -28,7 +31,9 @@ services:
     container_name: haproxy-api
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000" # API (localhost only - access via HAProxy reverse proxy)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./haproxy/config.d:/app/config/haproxy
       - ./haproxy/maps:/app/config/haproxy_maps
@@ -40,7 +45,9 @@ services:
       - ./haproxy/sockets:/app/sockets
       - ./data/api:/app/data
       - ./logs/api:/app/logs
+      - acme_sh_data:/root/.acme.sh
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./modsecurity/rules:/app/config/modsecurity-rules:rw
     environment:
       - NODE_ENV=production
       - DB_HOST=db
@@ -54,6 +61,7 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin12345}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - LOG_FILE=/app/logs/api.log
+      - HAPROXY_PUBLIC_IP=195.87.80.166
     networks:
       - haproxy-network
     depends_on:
@@ -92,16 +100,35 @@ services:
       dockerfile: spoa/Dockerfile
     container_name: haproxy-spoa
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - haproxy-network
     volumes:
       - ./modsecurity/logs:/var/log/modsecurity
     environment:
-      - MODSEC_RULE_ENGINE=${MODSEC_RULE_ENGINE:-DetectionOnly}
-      - MODSEC_AUDIT_ENGINE=${MODSEC_AUDIT_ENGINE:-RelevantOnly}
+      - MODSEC_RULE_ENGINE=On
+      - MODSEC_AUDIT_ENGINE=RelevantOnly
+
+  guard:
+    build:
+      context: ./guard
+      dockerfile: Dockerfile
+    container_name: haproxy-guard
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    network_mode: host
+    volumes:
+      - ./logs/haproxy:/logs/haproxy:rw
+      - ./guard/whitelist.txt:/app/whitelist.txt:rw
+    environment:
+      - TZ=Europe/Istanbul
 
 networks:
   haproxy-network:
     driver: bridge
 
-# Removed unused postgres_data volume - using bind mount instead
+volumes:
+  acme_sh_data:
