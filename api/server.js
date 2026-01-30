@@ -553,7 +553,7 @@ async function generateDynamicHAProxyConfig(rules, tcpRules = []) {
       console.log('Generating TCP listener config for', tcpRules.length, 'rules');
       tcpRules.forEach(rule => {
         const serverName = rule.name.replace(/[^a-zA-Z0-9_-]/g, '_');
-        tcpListeners += `listen tcp_${rule.id}\n`;
+        tcpListeners += `listen tcp_${rule.id}_port_${rule.frontend_port}\n`;
         tcpListeners += `    bind *:${rule.frontend_port}\n`;
         tcpListeners += `    mode ${rule.protocol || 'tcp'}\n`;
         tcpListeners += `    server ${serverName} ${rule.backend_host}:${rule.backend_port} check\n`;
