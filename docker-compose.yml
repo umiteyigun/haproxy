@@ -3,10 +3,11 @@ services:
     image: haproxy:2.8-alpine
     container_name: haproxy
     restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-      - "127.0.0.1:8404:8404" # HAProxy stats (localhost only)
+    # Network mode host allows dynamic port binding without container restart
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_BIND_SERVICE
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -21,8 +22,6 @@ services:
     depends_on:
       - api
       - spoa
-    networks:
-      - haproxy-network
 
   api:
     build:
@@ -75,6 +74,8 @@ services:
       dockerfile: Dockerfile
     container_name: haproxy-web
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:8088:80" # Web UI exposed to localhost for HAProxy to reach
     volumes:
       - ./web:/var/www/html:ro
       - ./certbot/www:/var/www/html/.well-known/acme-challenge:ro
@@ -102,6 +103,8 @@ services:
       dockerfile: spoa/Dockerfile
     container_name: haproxy-spoa
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:12345:12345" # SPOA exposed to localhost
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:

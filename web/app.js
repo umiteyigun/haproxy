@@ -913,6 +913,11 @@ function showAddIngressModal() {
         lbModeSelect.value = 'roundrobin';
     }
 
+    const backendProtocolSelect = document.getElementById('backend_protocol');
+    if (backendProtocolSelect) {
+        backendProtocolSelect.value = 'http';
+    }
+
     const backendTargets = document.getElementById('backendTargets');
     if (backendTargets) {
         backendTargets.value = '';
@@ -1475,6 +1480,7 @@ async function saveIngressRule() {
         ssl_cert: sslCert,
         dns_provider: dnsProvider,
         lb_mode: normalizedLbMode,
+        backend_protocol: formData.get('backend_protocol') || 'http',
         backends: backends,
         active: true,
         redirect_to_https: document.getElementById('redirectToHttps')?.checked || false
@@ -2386,6 +2392,11 @@ async function editIngressRule(id) {
         const lbModeSelect = document.getElementById('lbMode');
         if (lbModeSelect) {
             lbModeSelect.value = (rule.lb_mode || 'roundrobin');
+        }
+
+        const backendProtocolSelect = document.getElementById('backend_protocol');
+        if (backendProtocolSelect) {
+            backendProtocolSelect.value = (rule.backend_protocol || 'http');
         }
 
         const backendTargets = document.getElementById('backendTargets');
@@ -3656,12 +3667,17 @@ async function updateTrafficStats() {
             if (el) {
                 const statusColor = s.status === 'UP' ? 'success' : 'danger';
 
+                const bin = parseInt(s.bin, 10) || 0;
+                const bout = parseInt(s.bout, 10) || 0;
+                const scur = parseInt(s.scur, 10) || 0;
+                const rate = parseInt(s.rate, 10) || 0;
+
                 el.innerHTML = `
                     <div class="d-flex flex-column" style="font-size: 0.8rem">
-                        <div><i class="bi bi-arrow-down text-success"></i> ${formatBytes(s.bin)} <i class="bi bi-arrow-up text-primary"></i> ${formatBytes(s.bout)}</div>
+                        <div><i class="bi bi-arrow-down text-success"></i> ${formatBytes(bin)} <i class="bi bi-arrow-up text-primary"></i> ${formatBytes(bout)}</div>
                         <div class="mt-1">
                             <span class="badge bg-${statusColor} p-1">${s.status}</span> 
-                            <span>${s.scur} conn (${s.rate}/s)</span>
+                            <span>${scur} conn (${rate}/s)</span>
                         </div>
                     </div>
                 `;

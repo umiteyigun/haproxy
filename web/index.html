@@ -766,6 +766,15 @@
                             <input type="number" class="form-control" name="backend_port" required>
                         </div>
                         <div class="mb-3">
+                            <label class="form-label">Backend Protokolü</label>
+                            <select class="form-select" name="backend_protocol" id="backend_protocol">
+                                <option value="http" selected>HTTP (Standart)</option>
+                                <option value="https">HTTPS (SSL - Re-encryption)</option>
+                            </select>
+                            <small class="form-text text-muted">Arka sunucu SSL kullanıyorsa HTTPS seçin. (Sertifika
+                                doğrulaması yapılmaz)</small>
+                        </div>
+                        <div class="mb-3">
                             <label class="form-label">Load Balancing Modu</label>
                             <select class="form-select" name="lb_mode" id="lbMode">
                                 <option value="roundrobin" selected>Yük Dengeleme (Round Robin)</option>

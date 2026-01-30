@@ -418,6 +418,12 @@ if __name__ == "__main__":
     t2.daemon = True
     t2.start()
 
+    # Start Port Manager Thread
+    import port_manager
+    t_pm = threading.Thread(target=port_manager.run_port_manager)
+    t_pm.daemon = True
+    t_pm.start()
+
     log(f"Watching {LOG_FILE}")
     try:
         tail_file(LOG_FILE)
