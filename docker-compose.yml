@@ -129,6 +129,7 @@ services:
     volumes:
       - ./logs/haproxy:/logs/haproxy:rw
       - ./guard/whitelist.txt:/app/whitelist.txt:rw
+      - ./haproxy/config.d:/app/config/haproxy:ro
     environment:
       - TZ=Europe/Istanbul
 
