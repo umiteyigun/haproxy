@@ -1,4 +1,0 @@
-#! Managed blacklist entries (CIDR or IP per line)
-# Examples:
-# 203.0.113.45
-# 198.51.100.0/24
