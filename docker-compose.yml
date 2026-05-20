@@ -1,0 +1,143 @@
+services:
+  haproxy:
+    image: haproxy:2.8-alpine
+    container_name: haproxy
+    restart: unless-stopped
+    user: "0"
+    # Network mode host allows dynamic port binding without container restart
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_BIND_SERVICE
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:rw
+      - ./haproxy/config.d:/usr/local/etc/haproxy/config.d:ro
+      - ./haproxy/maps:/usr/local/etc/haproxy/maps:ro
+      - ./haproxy/modsecurity.conf:/usr/local/etc/haproxy/modsecurity.conf:ro
+      - ./haproxy/certs:/etc/ssl/certs/haproxy:ro
+      - ./haproxy/certs:/usr/local/etc/haproxy/certs:ro
+      - ./logs/haproxy:/var/log/haproxy:rw
+      - ./haproxy/sockets:/app/sockets:rw
+    depends_on:
+      - api
+      - spoa
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: haproxy-api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000" # API (localhost only - access via HAProxy reverse proxy)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./haproxy/config.d:/app/config/haproxy
+      - ./haproxy/maps:/app/config/haproxy_maps
+      - ./haproxy/haproxy.cfg:/app/config/haproxy/haproxy.cfg:rw
+      - ./certbot/conf:/app/config/certbot
+      - ./certbot/creds:/app/config/certbot/creds:ro
+      - ./certbot/www:/app/config/certbot-www
+      - ./haproxy/certs:/app/config/haproxy-certs
+      - ./haproxy/sockets:/app/sockets
+      - ./data/api:/app/data
+      - ./logs/api:/app/logs
+      - acme_sh_data:/root/.acme.sh
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./modsecurity/rules:/app/config/modsecurity-rules:rw
+      - ./modsecurity/crs:/app/config/owasp-crs:rw
+      - ./modsecurity/logs:/app/config/modsecurity-logs:ro
+      - ./logs/haproxy:/logs/haproxy:ro
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=haproxy
+      - DB_USER=haproxy
+      - DB_PASSWORD=haproxy_password_change_me
+      - HAPROXY_SOCKET=/app/sockets/haproxy.sock
+      - JWT_SECRET=${JWT_SECRET:-change_this_secret}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin12345}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_FILE=/app/logs/api.log
+      - HAPROXY_PUBLIC_IP=195.87.80.166
+      - GUARD_API_URL=http://172.18.0.1:5005
+    networks:
+      - haproxy-network
+    depends_on:
+      - db
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: haproxy-web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8088:80" # Web UI exposed to localhost for HAProxy to reach
+    volumes:
+      - ./web:/var/www/html:ro
+      - ./certbot/www:/var/www/html/.well-known/acme-challenge:ro
+    depends_on:
+      - api
+    networks:
+      - haproxy-network
+
+  db:
+    image: postgres:15-alpine
+    container_name: haproxy-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=haproxy
+      - POSTGRES_USER=haproxy
+      - POSTGRES_PASSWORD=haproxy_password_change_me
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    networks:
+      - haproxy-network
+
+  spoa:
+    build:
+      context: .
+      dockerfile: spoa/Dockerfile
+    container_name: haproxy-spoa
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:12345:12345" # SPOA exposed to localhost
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - haproxy-network
+    volumes:
+      - ./modsecurity/logs:/var/log/modsecurity
+    environment:
+      - MODSEC_RULE_ENGINE=On
+      - MODSEC_AUDIT_ENGINE=RelevantOnly
+
+  guard:
+    build:
+      context: ./guard
+      dockerfile: Dockerfile
+    container_name: haproxy-guard
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    network_mode: host
+    volumes:
+      - ./logs/haproxy:/logs/haproxy:rw
+      - ./guard/whitelist.txt:/app/whitelist.txt:rw
+      - ./haproxy/config.d:/app/config/haproxy:ro
+    environment:
+      - TZ=Europe/Istanbul
+
+networks:
+  haproxy-network:
+    driver: bridge
+
+volumes:
+  acme_sh_data:

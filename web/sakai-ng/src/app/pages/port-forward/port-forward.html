@@ -1,0 +1,235 @@
+﻿<p-toast />
+<p-confirmDialog />
+
+<p-tabs value="0">
+    <p-tablist>
+        <p-tab value="0">
+            <i class="pi pi-arrows-h mr-2"></i>Port Yonlendirme
+        </p-tab>
+        <p-tab value="1">
+            <i class="pi pi-shield mr-2"></i>Global WAF Kural Yonetimi
+        </p-tab>
+    </p-tablist>
+
+    <p-tabpanels>
+        <!-- Tab 0: Port Forwarding -->
+        <p-tabpanel value="0">
+            <p-toolbar styleClass="mb-4">
+                <ng-template #start>
+                    <h2 class="text-xl font-semibold m-0">Port Yonlendirme Kurallari</h2>
+                </ng-template>
+                <ng-template #end>
+                    <p-iconfield class="mr-2">
+                        <p-inputicon styleClass="pi pi-search" />
+                        <input pInputText [(ngModel)]="filterText" placeholder="Ara..." (ngModelChange)="dt.filterGlobal($event, 'contains')" />
+                    </p-iconfield>
+                    <p-button icon="pi pi-refresh" label="Yenile" severity="secondary" styleClass="mr-2" (onClick)="load()" [loading]="loading()" />
+                    <p-button label="Yeni Kural" icon="pi pi-plus" (onClick)="openNew()" />
+                </ng-template>
+            </p-toolbar>
+
+            <p-table #dt [value]="rules()" [loading]="loading()" [globalFilterFields]="globalFilterFields" styleClass="p-datatable-sm"
+                [rows]="25" [paginator]="true" [rowsPerPageOptions]="[10, 25, 50, 100]"
+                [showFirstLastIcon]="true" [showCurrentPageReport]="true"
+                currentPageReportTemplate="Toplam {totalRecords} kayittan {first}-{last} gosteriliyor"
+                [sortMode]="'multiple'">
+                <ng-template pTemplate="loadingicon">
+                    <p-progressSpinner strokeWidth="4" animationDuration=".8s" styleClass="w-4rem h-4rem" />
+                </ng-template>
+                <ng-template #header>
+                    <tr>
+                        <th pSortableColumn="name">
+                            <div class="flex items-center gap-1">Isim <p-sortIcon field="name" /><p-columnFilter type="text" field="name" display="menu" /></div>
+                        </th>
+                        <th pSortableColumn="frontend_port">
+                            <div class="flex items-center gap-1">Frontend Port <p-sortIcon field="frontend_port" /><p-columnFilter type="numeric" field="frontend_port" display="menu" /></div>
+                        </th>
+                        <th pSortableColumn="backend_host">
+                            <div class="flex items-center gap-1">Backend Host <p-sortIcon field="backend_host" /><p-columnFilter type="text" field="backend_host" display="menu" /></div>
+                        </th>
+                        <th pSortableColumn="backend_port">
+                            <div class="flex items-center gap-1">Backend Port <p-sortIcon field="backend_port" /><p-columnFilter type="numeric" field="backend_port" display="menu" /></div>
+                        </th>
+                        <th pSortableColumn="protocol">
+                            <div class="flex items-center gap-1">Protokol <p-sortIcon field="protocol" /><p-columnFilter type="text" field="protocol" display="menu" /></div>
+                        </th>
+                        <th>Islem</th>
+                    </tr>
+                </ng-template>
+                <ng-template #body let-rule>
+                    <tr>
+                        <td><strong>{{ rule.name }}</strong></td>
+                        <td>{{ rule.frontend_port }}</td>
+                        <td>{{ rule.backend_host }}</td>
+                        <td>{{ rule.backend_port }}</td>
+                        <td>
+                            <p-tag [value]="rule.protocol || 'tcp'" />
+                        </td>
+                        <td>
+                            <p-button icon="pi pi-pencil" [text]="true" [rounded]="true" (onClick)="editRule(rule)" pTooltip="Duzenle" />
+                            <p-button icon="pi pi-trash" [text]="true" [rounded]="true" severity="danger" (onClick)="deleteRule(rule)" pTooltip="Sil" />
+                        </td>
+                    </tr>
+                </ng-template>
+                <ng-template #emptymessage>
+                    <tr><td colspan="6" class="text-center p-4">Port yonlendirme kurali bulunamadi</td></tr>
+                </ng-template>
+            </p-table>
+        </p-tabpanel>
+
+        <!-- Tab 1: Global WAF Kural Yonetimi -->
+        <p-tabpanel value="1">
+            <div class="grid grid-cols-1 gap-6 mt-2">
+
+                <!-- IP Kara Listesi -->
+                <div class="card">
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="flex items-center gap-2">
+                            <i class="pi pi-ban text-red-500 text-xl"></i>
+                            <h3 class="text-lg font-semibold m-0">IP Kara Listesi</h3>
+                            <p-tag [value]="blacklist().length + ' kayit'" severity="danger" />
+                        </div>
+                        <p-button icon="pi pi-refresh" [text]="true" [rounded]="true" severity="secondary"
+                            (onClick)="loadBlacklist()" [loading]="loadingBlacklist()" pTooltip="Yenile" />
+                    </div>
+                    <p class="text-sm text-color-secondary mb-3">
+                        HAProxy tarafindan engellenen IP adresleri ve CIDR bloklari.
+                        Degisiklikler aninda HAProxy'ye uygulanir.
+                    </p>
+
+                    <!-- Add entry row -->
+                    <div class="flex gap-2 mb-4">
+                        <p-iconfield class="flex-1">
+                            <p-inputicon styleClass="pi pi-search" />
+                            <input pInputText [(ngModel)]="filterBlacklist" placeholder="Listede ara..." class="w-full" />
+                        </p-iconfield>
+                        <input pInputText [(ngModel)]="newBlacklistEntry" placeholder="IP veya CIDR (ornek: 1.2.3.4 veya 10.0.0.0/8)"
+                            class="flex-1" (keyup.enter)="addBlacklistEntry()" />
+                        <p-button icon="pi pi-plus" label="Ekle" (onClick)="addBlacklistEntry()"
+                            [loading]="savingBlacklist()" [disabled]="!newBlacklistEntry.trim()" />
+                    </div>
+
+                    <!-- Blacklist table -->
+                    @if (loadingBlacklist()) {
+                        <div class="flex justify-center p-4">
+                            <p-progressSpinner strokeWidth="4" animationDuration=".8s" styleClass="w-3rem h-3rem" />
+                        </div>
+                    } @else {
+                        <p-table [value]="filteredBlacklist()" styleClass="p-datatable-sm p-datatable-striped"
+                            [rows]="20" [paginator]="filteredBlacklist().length > 20"
+                            [rowsPerPageOptions]="[20, 50, 100]">
+                            <ng-template #header>
+                                <tr>
+                                    <th>IP / CIDR</th>
+                                    <th style="width: 80px">Islem</th>
+                                </tr>
+                            </ng-template>
+                            <ng-template #body let-entry>
+                                <tr>
+                                    <td><code class="text-sm">{{ entry }}</code></td>
+                                    <td>
+                                        <p-button icon="pi pi-trash" [text]="true" [rounded]="true" severity="danger"
+                                            (onClick)="deleteBlacklistEntry(entry)" pTooltip="Kaldir" />
+                                    </td>
+                                </tr>
+                            </ng-template>
+                            <ng-template #emptymessage>
+                                <tr><td colspan="2" class="text-center p-4 text-color-secondary">Kara listede kayit yok</td></tr>
+                            </ng-template>
+                        </p-table>
+                    }
+                </div>
+
+                <!-- Engellenen User-Agent'lar -->
+                <div class="card">
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="flex items-center gap-2">
+                            <i class="pi pi-desktop text-orange-500 text-xl"></i>
+                            <h3 class="text-lg font-semibold m-0">Engellenen User-Agent'lar</h3>
+                            <p-tag [value]="badUserAgents().length + ' kayit'" severity="warn" />
+                        </div>
+                        <p-button icon="pi pi-refresh" [text]="true" [rounded]="true" severity="secondary"
+                            (onClick)="loadUserAgents()" [loading]="loadingUserAgents()" pTooltip="Yenile" />
+                    </div>
+                    <p class="text-sm text-color-secondary mb-3">
+                        HAProxy tarafindan engellenen User-Agent string'leri (kismi esleme ile calisir).
+                        Degisiklikler aninda HAProxy'ye uygulanir.
+                    </p>
+
+                    <!-- Add entry row -->
+                    <div class="flex gap-2 mb-4">
+                        <p-iconfield class="flex-1">
+                            <p-inputicon styleClass="pi pi-search" />
+                            <input pInputText [(ngModel)]="filterUserAgents" placeholder="Listede ara..." class="w-full" />
+                        </p-iconfield>
+                        <input pInputText [(ngModel)]="newUserAgent" placeholder="User-Agent string'i (ornek: curl/7, sqlmap, nikto)"
+                            class="flex-1" (keyup.enter)="addUserAgent()" />
+                        <p-button icon="pi pi-plus" label="Ekle" (onClick)="addUserAgent()"
+                            [loading]="savingUserAgents()" [disabled]="!newUserAgent.trim()" />
+                    </div>
+
+                    <!-- User agents table -->
+                    @if (loadingUserAgents()) {
+                        <div class="flex justify-center p-4">
+                            <p-progressSpinner strokeWidth="4" animationDuration=".8s" styleClass="w-3rem h-3rem" />
+                        </div>
+                    } @else {
+                        <p-table [value]="filteredUserAgents()" styleClass="p-datatable-sm p-datatable-striped"
+                            [rows]="20" [paginator]="filteredUserAgents().length > 20"
+                            [rowsPerPageOptions]="[20, 50, 100]">
+                            <ng-template #header>
+                                <tr>
+                                    <th>User-Agent String</th>
+                                    <th style="width: 80px">Islem</th>
+                                </tr>
+                            </ng-template>
+                            <ng-template #body let-entry>
+                                <tr>
+                                    <td><code class="text-sm">{{ entry }}</code></td>
+                                    <td>
+                                        <p-button icon="pi pi-trash" [text]="true" [rounded]="true" severity="danger"
+                                            (onClick)="deleteUserAgent(entry)" pTooltip="Kaldir" />
+                                    </td>
+                                </tr>
+                            </ng-template>
+                            <ng-template #emptymessage>
+                                <tr><td colspan="2" class="text-center p-4 text-color-secondary">Engellenen user-agent bulunamadi</td></tr>
+                            </ng-template>
+                        </p-table>
+                    }
+                </div>
+
+            </div>
+        </p-tabpanel>
+    </p-tabpanels>
+</p-tabs>
+
+<!-- Port Forwarding Dialog -->
+<p-dialog [(visible)]="dialogVisible" [header]="editMode() ? 'Kural Duzenle' : 'Yeni Kural'" [modal]="true" [style]="{width: '480px'}">
+    <div class="flex flex-col gap-4">
+        <div class="flex flex-col gap-1">
+            <label class="font-medium">Isim</label>
+            <input pInputText [(ngModel)]="form.name" placeholder="mysql-forward" />
+        </div>
+        <div class="flex flex-col gap-1">
+            <label class="font-medium">Frontend Port</label>
+            <input pInputText [(ngModel)]="form.frontend_port" type="number" placeholder="3306" />
+        </div>
+        <div class="flex flex-col gap-1">
+            <label class="font-medium">Backend Host</label>
+            <input pInputText [(ngModel)]="form.backend_host" placeholder="192.168.1.20" />
+        </div>
+        <div class="flex flex-col gap-1">
+            <label class="font-medium">Backend Port</label>
+            <input pInputText [(ngModel)]="form.backend_port" type="number" placeholder="3306" />
+        </div>
+        <div class="flex flex-col gap-1">
+            <label class="font-medium">Protokol</label>
+            <p-select [(ngModel)]="form.protocol" [options]="protocolOptions" optionLabel="label" optionValue="value" styleClass="w-full" />
+        </div>
+    </div>
+    <ng-template #footer>
+        <p-button label="Iptal" [text]="true" (onClick)="dialogVisible = false" />
+        <p-button label="Kaydet" [loading]="saving()" (onClick)="save()" />
+    </ng-template>
+</p-dialog>

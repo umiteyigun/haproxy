@@ -1,0 +1,200 @@
+<p-toast />
+<p-confirmDialog />
+
+<!-- Sistem Durumu -->
+<div class="flex flex-wrap gap-4 mb-4 align-items-center p-3 border-round border-1 surface-border surface-ground">
+    <div class="flex align-items-center gap-2">
+        @if (guardOnline() === null) {
+            <i class="pi pi-spin pi-spinner text-blue-500"></i>
+        } @else if (guardOnline()) {
+            <i class="pi pi-check-circle text-green-500"></i>
+        } @else {
+            <i class="pi pi-times-circle text-red-500"></i>
+        }
+        <span class="text-sm font-semibold">Guard Servisi</span>
+        @if (guardOnline() === null) {
+            <p-tag value="Kontrol ediliyor..." severity="secondary" />
+        } @else if (guardOnline()) {
+            <p-tag value="Aktif ve Çalışıyor" severity="success" />
+        } @else {
+            <p-tag value="Çevrimdışı" severity="danger" />
+        }
+    </div>
+    <span class="text-400">|</span>
+    <div class="flex align-items-center gap-2">
+        <i class="pi pi-shield text-blue-500"></i>
+        <span class="text-sm font-semibold">WAF (ModSecurity)</span>
+        <p-tag value="Aktif (Detection Only)" severity="info" />
+    </div>
+    <span class="text-400">|</span>
+    <div class="flex align-items-center gap-2">
+        <i class="pi pi-gauge text-orange-500"></i>
+        <span class="text-sm font-semibold">Rate Limiting</span>
+        <p-tag value="100 req/s" severity="warn" />
+    </div>
+    <span class="text-400">|</span>
+    <div class="flex align-items-center gap-2">
+        <i class="pi pi-ban text-red-500"></i>
+        <span class="text-sm font-semibold">Aktif Ban</span>
+        <p-tag [value]="bans().length + ' IP'" severity="danger" />
+    </div>
+</div>
+
+<p-tabs value="0">
+    <p-tablist>
+        <p-tab value="0">Guard Ayarları</p-tab>
+        <p-tab value="1">Banlı IP'ler</p-tab>
+        <p-tab value="2">Whitelist</p-tab>
+    </p-tablist>
+    <p-tabpanels>
+    <p-tabpanel value="0">
+        <div class="grid gap-4 p-2" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));">
+            <!-- Ban Yapılandırması -->
+            <div class="surface-card p-4 border-round border-1 surface-border">
+                <h4 class="text-lg font-semibold mb-3 flex align-items-center gap-2">
+                    <i class="pi pi-cog text-primary"></i>
+                    Ban Yapılandırması
+                </h4>
+                <div class="flex flex-column gap-3">
+                    <div class="flex justify-content-between align-items-center">
+                        <span class="text-sm text-600">Ban Eşiği</span>
+                        <p-tag value="5 hata" severity="warn" />
+                    </div>
+                    <div class="flex justify-content-between align-items-center">
+                        <span class="text-sm text-600">Zaman Aralığı</span>
+                        <p-tag value="60 saniye" severity="info" />
+                    </div>
+                    <div class="flex justify-content-between align-items-center">
+                        <span class="text-sm text-600">Ban Süresi</span>
+                        <p-tag value="1 saat (3600 sn)" severity="secondary" />
+                    </div>
+                </div>
+                <div class="mt-3 p-3 surface-100 border-round text-sm text-600">
+                    <i class="pi pi-info-circle mr-1"></i>
+                    60 saniyede 5 hatalı istek yapan IP otomatik olarak banlanır.
+                </div>
+            </div>
+            <!-- İzlenen HTTP Kodları -->
+            <div class="surface-card p-4 border-round border-1 surface-border">
+                <h4 class="text-lg font-semibold mb-3 flex align-items-center gap-2">
+                    <i class="pi pi-exclamation-triangle text-orange-500"></i>
+                    İzlenen HTTP Kodları
+                </h4>
+                <p class="text-sm text-600 mb-3">Bu durum kodları başarısız istek sayacına eklenir:</p>
+                <div class="flex flex-wrap gap-2">
+                    <p-tag value="401 Unauthorized" severity="danger" />
+                    <p-tag value="403 Forbidden" severity="danger" />
+                    <p-tag value="404 Not Found" severity="warn" />
+                    <p-tag value="429 Too Many Requests" severity="danger" />
+                </div>
+            </div>
+            <!-- Anlık Ban Yolları -->
+            <div class="surface-card p-4 border-round border-1 surface-border">
+                <h4 class="text-lg font-semibold mb-3 flex align-items-center gap-2">
+                    <i class="pi pi-bolt text-red-500"></i>
+                    Anlık Ban Yolları
+                </h4>
+                <p class="text-sm text-600 mb-3">Bu yollara erişim ilk istekte anında ban ile sonuçlanır:</p>
+                <div class="flex flex-wrap gap-2">
+                    <span class="surface-100 px-2 py-1 border-round text-xs font-mono">.env</span>
+                    <span class="surface-100 px-2 py-1 border-round text-xs font-mono">.git</span>
+                    <span class="surface-100 px-2 py-1 border-round text-xs font-mono">wp-admin</span>
+                    <span class="surface-100 px-2 py-1 border-round text-xs font-mono">wp-login</span>
+                    <span class="surface-100 px-2 py-1 border-round text-xs font-mono">config.php</span>
+                    <span class="surface-100 px-2 py-1 border-round text-xs font-mono">/api/.env</span>
+                    <span class="surface-100 px-2 py-1 border-round text-xs font-mono">/backend/.env</span>
+                    <span class="surface-100 px-2 py-1 border-round text-xs font-mono">/shell</span>
+                    <span class="surface-100 px-2 py-1 border-round text-xs font-mono">/admin/</span>
+                </div>
+            </div>
+            <!-- Göz Ardı Edilen Yollar -->
+            <div class="surface-card p-4 border-round border-1 surface-border">
+                <h4 class="text-lg font-semibold mb-3 flex align-items-center gap-2">
+                    <i class="pi pi-eye-slash text-green-500"></i>
+                    Göz Ardı Edilen Yollar
+                </h4>
+                <p class="text-sm text-600 mb-3">Bu uzantılar/yollar sayaçtan hariç tutulur:</p>
+                <div class="flex flex-wrap gap-2">
+                    <span class="surface-100 px-2 py-1 border-round text-xs font-mono">.jpg</span>
+                    <span class="surface-100 px-2 py-1 border-round text-xs font-mono">.png</span>
+                    <span class="surface-100 px-2 py-1 border-round text-xs font-mono">.gif</span>
+                    <span class="surface-100 px-2 py-1 border-round text-xs font-mono">.css</span>
+                    <span class="surface-100 px-2 py-1 border-round text-xs font-mono">.js</span>
+                    <span class="surface-100 px-2 py-1 border-round text-xs font-mono">.woff</span>
+                    <span class="surface-100 px-2 py-1 border-round text-xs font-mono">/favicon.ico</span>
+                    <span class="surface-100 px-2 py-1 border-round text-xs font-mono">/.well-known/acme-challenge/</span>
+                </div>
+            </div>
+        </div>
+    </p-tabpanel>
+    <p-tabpanel value="1">
+        <p-toolbar styleClass="mb-4">
+            <ng-template #end>
+                <p-iconfield class="mr-2">
+                    <p-inputicon styleClass="pi pi-search" />
+                    <input pInputText [(ngModel)]="filterTextBans" placeholder="IP ara..." (ngModelChange)="dtBans.filterGlobal($event, 'contains')" />
+                </p-iconfield>
+                <input pInputText [(ngModel)]="manualBanIp" placeholder="IP adresi" class="mr-2" />
+                <p-button label="Manuel Ban" icon="pi pi-ban" severity="danger" (onClick)="addBan()" [loading]="banLoading()" />
+            </ng-template>
+        </p-toolbar>
+        <p-table #dtBans [value]="bans()" [loading]="loadingBans()" [globalFilterFields]="globalFilterFieldsBans" styleClass="p-datatable-sm" [rows]="20" [paginator]="true">
+            <ng-template #header>
+                <tr>
+                    <th>IP Adresi</th>
+                    <th>Ban Tarihi</th>
+                    <th>Sebep</th>
+                    <th>İşlem</th>
+                </tr>
+            </ng-template>
+            <ng-template #body let-ban>
+                <tr>
+                    <td><strong>{{ ban.ip }}</strong></td>
+                    <td>{{ ban.banned_at ? (ban.banned_at | date:'dd.MM.yyyy HH:mm') : '-' }}</td>
+                    <td>{{ ban.reason || '-' }}</td>
+                    <td>
+                        <p-button label="Unban" icon="pi pi-unlock" [text]="true" severity="success" (onClick)="unban(ban)" />
+                    </td>
+                </tr>
+            </ng-template>
+            <ng-template #emptymessage>
+                <tr><td colspan="4" class="text-center p-4">Banlı IP bulunamadı</td></tr>
+            </ng-template>
+        </p-table>
+    </p-tabpanel>
+
+    <p-tabpanel value="2">
+        <p-toolbar styleClass="mb-4">
+            <ng-template #end>
+                <p-iconfield class="mr-2">
+                    <p-inputicon styleClass="pi pi-search" />
+                    <input pInputText [(ngModel)]="filterTextWhitelist" placeholder="IP ara..." (ngModelChange)="dtWhitelist.filterGlobal($event, 'contains')" />
+                </p-iconfield>
+                <input pInputText [(ngModel)]="newWhitelistIp" placeholder="IP adresi veya CIDR" class="mr-2" />
+                <p-button label="Whitelist'e Ekle" icon="pi pi-plus" (onClick)="addWhitelist()" [loading]="whitelistLoading()" />
+            </ng-template>
+        </p-toolbar>
+        <p-table #dtWhitelist [value]="whitelist()" [loading]="loadingWhitelist()" [globalFilterFields]="globalFilterFieldsWhitelist" styleClass="p-datatable-sm" [rows]="20" [paginator]="true">
+            <ng-template #header>
+                <tr>
+                    <th>IP / CIDR</th>
+                    <th>Eklenme Tarihi</th>
+                    <th>İşlem</th>
+                </tr>
+            </ng-template>
+            <ng-template #body let-item>
+                <tr>
+                    <td><strong>{{ item.ip || item }}</strong></td>
+                    <td>{{ item.created_at ? (item.created_at | date:'dd.MM.yyyy') : '-' }}</td>
+                    <td>
+                        <p-button icon="pi pi-trash" [text]="true" [rounded]="true" severity="danger" (onClick)="removeWhitelist(item)" pTooltip="Kaldır" />
+                    </td>
+                </tr>
+            </ng-template>
+            <ng-template #emptymessage>
+                <tr><td colspan="3" class="text-center p-4">Whitelist boş</td></tr>
+            </ng-template>
+        </p-table>
+    </p-tabpanel>
+    </p-tabpanels>
+</p-tabs>

@@ -1,0 +1,72 @@
+<p-toast />
+<p-toolbar styleClass="mb-4">
+    <ng-template #start>
+        <h2 class="text-xl font-semibold m-0">Trafik Logları</h2>
+        <p-tag [value]="logs().length + ' kayıt'" styleClass="ml-3" />
+    </ng-template>
+    <ng-template #end>
+        <p-iconfield class="mr-2">
+            <p-inputicon styleClass="pi pi-search" />
+            <input pInputText [(ngModel)]="filterText" placeholder="IP, path veya status ara..." (ngModelChange)="dt.filterGlobal($event, 'contains')" />
+        </p-iconfield>
+        <p-button [icon]="autoRefresh() ? 'pi pi-pause' : 'pi pi-play'" [label]="autoRefresh() ? 'Otomatik Yenilemeyi Durdur' : 'Otomatik Yenile'" [outlined]="true" styleClass="mr-2" (onClick)="toggleAutoRefresh()" />
+        <p-button icon="pi pi-refresh" label="Yenile" (onClick)="load()" [loading]="loading()" />
+    </ng-template>
+</p-toolbar>
+
+<p-table #dt [value]="logs()" [loading]="loading()" styleClass="p-datatable-sm"
+    [rows]="50" [paginator]="true" [rowsPerPageOptions]="[25, 50, 100, 200]"
+    [showFirstLastIcon]="true" [showCurrentPageReport]="true"
+    currentPageReportTemplate="Toplam {totalRecords} kayıttan {first}-{last} gösteriliyor"
+    [sortMode]="'multiple'"
+    [globalFilterFields]="globalFilterFields"
+    [scrollable]="true" scrollHeight="65vh">
+    <ng-template pTemplate="loadingicon">
+        <p-progressSpinner strokeWidth="4" animationDuration=".8s" styleClass="w-4rem h-4rem" />
+    </ng-template>
+    <ng-template #header>
+        <tr>
+            <th pSortableColumn="timestamp">
+                <div class="flex items-center gap-1">Zaman <p-sortIcon field="timestamp" /><p-columnFilter type="text" field="timestamp" display="menu" /></div>
+            </th>
+            <th pSortableColumn="client_ip">
+                <div class="flex items-center gap-1">Kaynak IP <p-sortIcon field="client_ip" /><p-columnFilter type="text" field="client_ip" display="menu" /></div>
+            </th>
+            <th pSortableColumn="method">
+                <div class="flex items-center gap-1">Method <p-sortIcon field="method" /><p-columnFilter type="text" field="method" display="menu" /></div>
+            </th>
+            <th pSortableColumn="path">
+                <div class="flex items-center gap-1">Path <p-sortIcon field="path" /><p-columnFilter type="text" field="path" display="menu" /></div>
+            </th>
+            <th pSortableColumn="status_code">
+                <div class="flex items-center gap-1">Durum <p-sortIcon field="status_code" /><p-columnFilter type="text" field="status_code" display="menu" /></div>
+            </th>
+            <th pSortableColumn="bytes_read">
+                <div class="flex items-center gap-1">Bayt <p-sortIcon field="bytes_read" /><p-columnFilter type="numeric" field="bytes_read" display="menu" /></div>
+            </th>
+            <th pSortableColumn="duration_ms">
+                <div class="flex items-center gap-1">Süre (ms) <p-sortIcon field="duration_ms" /><p-columnFilter type="numeric" field="duration_ms" display="menu" /></div>
+            </th>
+        </tr>
+    </ng-template>
+    <ng-template #body let-log>
+        <tr>
+            <td class="text-sm whitespace-nowrap">{{ log.timestamp || log.time || '-' }}</td>
+            <td><code class="text-sm">{{ log.client_ip || log.client || '-' }}</code></td>
+            <td>
+                <p-tag [value]="log.method || '-'" [severity]="getMethodSeverity(log.method)" />
+            </td>
+            <td class="text-sm max-w-xs overflow-hidden text-ellipsis" [title]="log.path || log.url">
+                {{ log.path || log.url || '-' }}
+            </td>
+            <td>
+                <p-tag [value]="(log.status_code || log.status || '-') + ''" [severity]="getStatusSeverity(log.status_code || log.status)" />
+            </td>
+            <td>{{ (log.bytes_read || 0) | number }}</td>
+            <td>{{ log.duration_ms || log.tr || '-' }}</td>
+        </tr>
+    </ng-template>
+    <ng-template #emptymessage>
+        <tr><td colspan="7" class="text-center p-4">Log kaydı bulunamadı</td></tr>
+    </ng-template>
+</p-table>

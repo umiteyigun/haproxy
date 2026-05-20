@@ -1,0 +1,88 @@
+<p-toast />
+<p-confirmDialog />
+<p-toolbar styleClass="mb-4">
+    <ng-template #start>
+        <h2 class="text-xl font-semibold m-0">Kullanıcı Yönetimi</h2>
+    </ng-template>
+    <ng-template #end>
+        <p-iconfield class="mr-2">
+            <p-inputicon styleClass="pi pi-search" />
+            <input pInputText [(ngModel)]="filterText" placeholder="Ara..." (ngModelChange)="dt.filterGlobal($event, 'contains')" />
+        </p-iconfield>
+        <p-button icon="pi pi-refresh" label="Yenile" severity="secondary" styleClass="mr-2" (onClick)="load()" [loading]="loading()" />
+        <p-button label="Şifremi Değiştir" icon="pi pi-key" [outlined]="true" styleClass="mr-2" (onClick)="openSelfPassword()" />
+        <p-button label="Yeni Kullanıcı" icon="pi pi-plus" (onClick)="openNew()" />
+    </ng-template>
+</p-toolbar>
+
+<p-table #dt [value]="members()" [loading]="loading()" [globalFilterFields]="globalFilterFields" styleClass="p-datatable-sm"
+    [rows]="25" [paginator]="true" [rowsPerPageOptions]="[10, 25, 50, 100]"
+    [showFirstLastIcon]="true" [showCurrentPageReport]="true"
+    currentPageReportTemplate="Toplam {totalRecords} kayıttan {first}-{last} gösteriliyor"
+    [sortMode]="'multiple'">
+    <ng-template pTemplate="loadingicon">
+        <p-progressSpinner strokeWidth="4" animationDuration=".8s" styleClass="w-4rem h-4rem" />
+    </ng-template>
+    <ng-template #header>
+        <tr>
+            <th pSortableColumn="email">
+                <div class="flex items-center gap-1">E-posta <p-sortIcon field="email" /><p-columnFilter type="text" field="email" display="menu" /></div>
+            </th>
+            <th pSortableColumn="created_at">
+                <div class="flex items-center gap-1">Oluşturulma <p-sortIcon field="created_at" /><p-columnFilter type="text" field="created_at" display="menu" /></div>
+            </th>
+            <th>İşlem</th>
+        </tr>
+    </ng-template>
+    <ng-template #body let-member>
+        <tr>
+            <td><strong>{{ member.email }}</strong></td>
+            <td>{{ member.created_at ? (member.created_at | date:'dd.MM.yyyy') : '-' }}</td>
+            <td>
+                <p-button icon="pi pi-key" [text]="true" [rounded]="true" (onClick)="openChangePassword(member)" pTooltip="Şifre Değiştir" />
+                <p-button icon="pi pi-trash" [text]="true" [rounded]="true" severity="danger" (onClick)="deleteMember(member)" pTooltip="Sil" [disabled]="member.email === currentEmail()" />
+            </td>
+        </tr>
+    </ng-template>
+    <ng-template #emptymessage>
+        <tr><td colspan="3" class="text-center p-4">Kullanıcı bulunamadı</td></tr>
+    </ng-template>
+</p-table>
+
+<!-- New Member Dialog -->
+<p-dialog [(visible)]="newDialogVisible" header="Yeni Kullanıcı" [modal]="true" [style]="{width: '420px'}">
+    <div class="flex flex-col gap-4">
+        <div class="flex flex-col gap-1">
+            <label class="font-medium">E-posta</label>
+            <input pInputText [(ngModel)]="newForm.email" type="email" placeholder="kullanici@ornek.com" />
+        </div>
+        <div class="flex flex-col gap-1">
+            <label class="font-medium">Şifre</label>
+            <input pInputText [(ngModel)]="newForm.password" type="password" placeholder="••••••••" />
+        </div>
+    </div>
+    <ng-template #footer>
+        <p-button label="İptal" [text]="true" (onClick)="newDialogVisible = false" />
+        <p-button label="Oluştur" [loading]="saving()" (onClick)="createMember()" />
+    </ng-template>
+</p-dialog>
+
+<!-- Change Password Dialog -->
+<p-dialog [(visible)]="passDialogVisible" [header]="selfPasswordMode ? 'Şifremi Değiştir' : 'Şifre Değiştir'" [modal]="true" [style]="{width: '420px'}">
+    <div class="flex flex-col gap-4">
+        @if (selfPasswordMode) {
+            <div class="flex flex-col gap-1">
+                <label class="font-medium">Mevcut Şifre</label>
+                <input pInputText [(ngModel)]="passForm.current" type="password" placeholder="••••••••" />
+            </div>
+        }
+        <div class="flex flex-col gap-1">
+            <label class="font-medium">Yeni Şifre</label>
+            <input pInputText [(ngModel)]="passForm.newPass" type="password" placeholder="••••••••" />
+        </div>
+    </div>
+    <ng-template #footer>
+        <p-button label="İptal" [text]="true" (onClick)="passDialogVisible = false" />
+        <p-button label="Kaydet" [loading]="saving()" (onClick)="changePassword()" />
+    </ng-template>
+</p-dialog>

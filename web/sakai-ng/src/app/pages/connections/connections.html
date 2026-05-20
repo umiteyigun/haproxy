@@ -1,0 +1,64 @@
+<p-toast />
+<p-toolbar styleClass="mb-4">
+    <ng-template #start>
+        <h2 class="text-xl font-semibold m-0">Aktif Bağlantılar</h2>
+        <p-tag [value]="connections().length + ' bağlantı'" styleClass="ml-3" />
+    </ng-template>
+    <ng-template #end>
+        <p-iconfield class="mr-2">
+            <p-inputicon styleClass="pi pi-search" />
+            <input pInputText [(ngModel)]="filterText" placeholder="IP veya domain ara..." (ngModelChange)="dt.filterGlobal($event, 'contains')" />
+        </p-iconfield>
+        <p-button [icon]="paused() ? 'pi pi-play' : 'pi pi-pause'" [label]="paused() ? 'Devam Et' : 'Duraklat'" [outlined]="true" styleClass="mr-2" (onClick)="togglePause()" />
+        <p-button icon="pi pi-refresh" label="Yenile" (onClick)="load()" [loading]="loading()" />
+    </ng-template>
+</p-toolbar>
+
+<p-table #dt [value]="connections()" [loading]="loading()" [globalFilterFields]="globalFilterFields"
+    styleClass="p-datatable-sm"
+    [rows]="50" [paginator]="true" [rowsPerPageOptions]="[25, 50, 100, 200]"
+    [showFirstLastIcon]="true" [showCurrentPageReport]="true"
+    currentPageReportTemplate="Toplam {totalRecords} kayıttan {first}-{last} gösteriliyor"
+    [sortMode]="'multiple'"
+    [scrollable]="true" scrollHeight="60vh">
+    <ng-template pTemplate="loadingicon">
+        <p-progressSpinner strokeWidth="4" animationDuration=".8s" styleClass="w-4rem h-4rem" />
+    </ng-template>
+    <ng-template #header>
+        <tr>
+            <th pSortableColumn="frontend">
+                <div class="flex items-center gap-1">Frontend <p-sortIcon field="frontend" /><p-columnFilter type="text" field="frontend" display="menu" /></div>
+            </th>
+            <th pSortableColumn="backend">
+                <div class="flex items-center gap-1">Backend <p-sortIcon field="backend" /><p-columnFilter type="text" field="backend" display="menu" /></div>
+            </th>
+            <th pSortableColumn="src">
+                <div class="flex items-center gap-1">Kaynak IP <p-sortIcon field="src" /><p-columnFilter type="text" field="src" display="menu" /></div>
+            </th>
+            <th pSortableColumn="state">
+                <div class="flex items-center gap-1">Durum <p-sortIcon field="state" /><p-columnFilter type="text" field="state" display="menu" /></div>
+            </th>
+            <th pSortableColumn="Tq">
+                <div class="flex items-center gap-1">Süre (ms) <p-sortIcon field="Tq" /><p-columnFilter type="numeric" field="Tq" display="menu" /></div>
+            </th>
+            <th pSortableColumn="bi">
+                <div class="flex items-center gap-1">Bayt <p-sortIcon field="bi" /><p-columnFilter type="numeric" field="bi" display="menu" /></div>
+            </th>
+        </tr>
+    </ng-template>
+    <ng-template #body let-conn>
+        <tr>
+            <td>{{ conn.frontend || conn.pxname }}</td>
+            <td>{{ conn.backend || conn.svname }}</td>
+            <td><code>{{ conn.src || conn.cliaddr }}</code></td>
+            <td>
+                <p-tag [value]="conn.state || conn.status || 'active'" severity="success" />
+            </td>
+            <td>{{ conn.Tq || conn.tq || '-' }}</td>
+            <td>{{ (conn.bi || 0) | number }}</td>
+        </tr>
+    </ng-template>
+    <ng-template #emptymessage>
+        <tr><td colspan="6" class="text-center p-4">Aktif bağlantı bulunamadı</td></tr>
+    </ng-template>
+</p-table>

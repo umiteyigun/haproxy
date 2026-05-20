@@ -1,0 +1,148 @@
+<div class="grid grid-cols-12 gap-4">
+    <!-- Stat Cards -->
+    <div class="col-span-12 md:col-span-3">
+        <p-card styleClass="h-full">
+            <div class="flex items-center gap-4">
+                <div class="flex-shrink-0 w-12 h-12 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center">
+                    <i class="pi pi-server text-blue-600 text-xl"></i>
+                </div>
+                <div>
+                    <p class="text-muted-color text-sm mb-1">Toplam Backend</p>
+                    <p class="text-2xl font-bold">{{ totalBackends() }}</p>
+                </div>
+            </div>
+        </p-card>
+    </div>
+    <div class="col-span-12 md:col-span-3">
+        <p-card styleClass="h-full">
+            <div class="flex items-center gap-4">
+                <div class="flex-shrink-0 w-12 h-12 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center">
+                    <i class="pi pi-check-circle text-green-600 text-xl"></i>
+                </div>
+                <div>
+                    <p class="text-muted-color text-sm mb-1">Aktif Backend</p>
+                    <p class="text-2xl font-bold text-green-600">{{ activeBackends() }}</p>
+                </div>
+            </div>
+        </p-card>
+    </div>
+    <div class="col-span-12 md:col-span-3">
+        <p-card styleClass="h-full">
+            <div class="flex items-center gap-4">
+                <div class="flex-shrink-0 w-12 h-12 bg-yellow-100 dark:bg-yellow-900 rounded-full flex items-center justify-center">
+                    <i class="pi pi-users text-yellow-600 text-xl"></i>
+                </div>
+                <div>
+                    <p class="text-muted-color text-sm mb-1">Aktif Oturumlar</p>
+                    <p class="text-2xl font-bold">{{ totalSessions() }}</p>
+                </div>
+            </div>
+        </p-card>
+    </div>
+    <div class="col-span-12 md:col-span-3">
+        <p-card styleClass="h-full">
+            <div class="flex items-center gap-4">
+                <div class="flex-shrink-0 w-12 h-12 bg-red-100 dark:bg-red-900 rounded-full flex items-center justify-center">
+                    <i class="pi pi-times-circle text-red-600 text-xl"></i>
+                </div>
+                <div>
+                    <p class="text-muted-color text-sm mb-1">Hatalı Backend</p>
+                    <p class="text-2xl font-bold text-red-600">{{ downBackends() }}</p>
+                </div>
+            </div>
+        </p-card>
+    </div>
+
+    <!-- Backend Status Table -->
+    <div class="col-span-12 xl:col-span-8">
+        <p-card header="Backend Durumu">
+            <ng-template #header>
+                <div class="flex justify-between items-center px-4 pt-4">
+                    <span class="font-semibold text-base">Backend Durumu</span>
+                    <div class="flex items-center gap-2">
+                        <p-iconfield>
+                            <p-inputicon styleClass="pi pi-search" />
+                            <input pInputText [(ngModel)]="filterText" placeholder="Ara..." (ngModelChange)="dt.filterGlobal($event, 'contains')" style="width:160px" />
+                        </p-iconfield>
+                        <p-button icon="pi pi-refresh" label="Yenile" severity="secondary" size="small" (onClick)="loadStats()" [loading]="loading()" />
+                    </div>
+                </div>
+            </ng-template>
+            <p-table #dt [value]="stats()" [loading]="loading()" [rows]="10" [paginator]="true"
+                [globalFilterFields]="globalFilterFields"
+                [rowsPerPageOptions]="[10, 25, 50, 100]" [showFirstLastIcon]="true"
+                [showCurrentPageReport]="true"
+                currentPageReportTemplate="Toplam {totalRecords} kayıttan {first}-{last} gösteriliyor"
+                [sortMode]="'multiple'" styleClass="p-datatable-sm">
+                <ng-template pTemplate="loadingicon">
+                    <p-progressSpinner strokeWidth="4" animationDuration=".8s" styleClass="w-4rem h-4rem" />
+                </ng-template>
+                <ng-template #header>
+                    <tr>
+                        <th pSortableColumn="pxname">
+                            <div class="flex items-center gap-1">Backend <p-sortIcon field="pxname" /><p-columnFilter type="text" field="pxname" display="menu" /></div>
+                        </th>
+                        <th pSortableColumn="svname">
+                            <div class="flex items-center gap-1">Sunucu <p-sortIcon field="svname" /><p-columnFilter type="text" field="svname" display="menu" /></div>
+                        </th>
+                        <th pSortableColumn="status">
+                            <div class="flex items-center gap-1">Durum <p-sortIcon field="status" /><p-columnFilter type="text" field="status" display="menu" /></div>
+                        </th>
+                        <th pSortableColumn="scur">
+                            <div class="flex items-center gap-1">Aktif <p-sortIcon field="scur" /><p-columnFilter type="numeric" field="scur" display="menu" /></div>
+                        </th>
+                        <th pSortableColumn="econ">
+                            <div class="flex items-center gap-1">Hata <p-sortIcon field="econ" /><p-columnFilter type="numeric" field="econ" display="menu" /></div>
+                        </th>
+                        <th pSortableColumn="bin">
+                            <div class="flex items-center gap-1">Bayt In <p-sortIcon field="bin" /><p-columnFilter type="numeric" field="bin" display="menu" /></div>
+                        </th>
+                    </tr>
+                </ng-template>
+                <ng-template #body let-row>
+                    <tr>
+                        <td>{{ row.pxname }}</td>
+                        <td>{{ row.svname }}</td>
+                        <td>
+                            <p-tag [value]="row.status" [severity]="row.status === 'UP' ? 'success' : row.status === 'DOWN' ? 'danger' : 'warn'" />
+                        </td>
+                        <td>{{ row.scur }}</td>
+                        <td>{{ row.econ }}</td>
+                        <td>{{ row.bin | number }}</td>
+                    </tr>
+                </ng-template>
+                <ng-template #emptymessage>
+                    <tr><td colspan="6" class="text-center p-4">Veri yok</td></tr>
+                </ng-template>
+            </p-table>
+        </p-card>
+    </div>
+
+    <!-- Chart -->
+    <div class="col-span-12 xl:col-span-4">
+        <p-card>
+            <ng-template #header>
+                <div class="flex justify-between items-center px-4 pt-4">
+                    <span class="font-semibold text-base">Backend Durum Dağılımı</span>
+                </div>
+            </ng-template>
+            <p-chart type="doughnut" [data]="chartData()" [options]="chartOptions" height="280px" />
+        </p-card>
+    </div>
+
+    <!-- Traffic Line Chart -->
+    <div class="col-span-12">
+        <p-card>
+            <ng-template #header>
+                <div class="flex justify-between items-center px-4 pt-4">
+                    <div class="flex items-center gap-2">
+                        <i class="pi pi-chart-line text-primary"></i>
+                        <span class="font-semibold text-base">Trafik Analizi (Son 50 Örnek)</span>
+                    </div>
+                    <p-tag value="CANLI" severity="success" />
+                </div>
+            </ng-template>
+            <p-chart type="line" [data]="trafficChartData()" [options]="trafficChartOptions" height="220px" />
+        </p-card>
+    </div>
+</div>

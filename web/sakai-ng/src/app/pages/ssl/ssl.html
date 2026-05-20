@@ -1,0 +1,121 @@
+<p-toast />
+<p-confirmDialog />
+<p-toolbar styleClass="mb-4">
+    <ng-template #start>
+        <h2 class="text-xl font-semibold m-0">SSL Sertifikaları</h2>
+    </ng-template>
+    <ng-template #end>
+        <p-iconfield class="mr-2">
+            <p-inputicon styleClass="pi pi-search" />
+            <input pInputText [(ngModel)]="filterText" placeholder="Ara..." (ngModelChange)="dt.filterGlobal($event, 'contains')" />
+        </p-iconfield>
+        <p-button icon="pi pi-refresh" label="Yenile" severity="secondary" styleClass="mr-2" (onClick)="load()" [loading]="loading()" />
+        <p-button label="Yeni Sertifika" icon="pi pi-plus" styleClass="mr-2" (onClick)="openRequest()" />
+        <p-button label="Tümünü Yenile" icon="pi pi-refresh" [outlined]="true" (onClick)="renewAll()" [loading]="renewingAll()" />
+    </ng-template>
+</p-toolbar>
+
+<p-table #dt [value]="certs()" [loading]="loading()" [globalFilterFields]="globalFilterFields" styleClass="p-datatable-sm"
+    [rows]="25" [paginator]="true" [rowsPerPageOptions]="[10, 25, 50, 100]"
+    [showFirstLastIcon]="true" [showCurrentPageReport]="true"
+    currentPageReportTemplate="Toplam {totalRecords} kayıttan {first}-{last} gösteriliyor"
+    [sortMode]="'multiple'">
+    <ng-template pTemplate="loadingicon">
+        <p-progressSpinner strokeWidth="4" animationDuration=".8s" styleClass="w-4rem h-4rem" />
+    </ng-template>
+    <ng-template #header>
+        <tr>
+            <th pSortableColumn="domain">
+                <div class="flex items-center gap-1">Domain <p-sortIcon field="domain" /><p-columnFilter type="text" field="domain" display="menu" /></div>
+            </th>
+            <th pSortableColumn="status">
+                <div class="flex items-center gap-1">Durum <p-sortIcon field="status" /><p-columnFilter type="text" field="status" display="menu" /></div>
+            </th>
+            <th pSortableColumn="expires_at">
+                <div class="flex items-center gap-1">Son Geçerlilik <p-sortIcon field="expires_at" /><p-columnFilter type="text" field="expires_at" display="menu" /></div>
+            </th>
+            <th pSortableColumn="wildcard">
+                <div class="flex items-center gap-1">Tür <p-sortIcon field="wildcard" /><p-columnFilter type="boolean" field="wildcard" display="menu" /></div>
+            </th>
+            <th>İşlem</th>
+        </tr>
+    </ng-template>
+    <ng-template #body let-cert>
+        <tr>
+            <td><strong>{{ cert.domain }}</strong></td>
+            <td>
+                <p-tag [value]="cert.status" [severity]="cert.status === 'active' ? 'success' : cert.status === 'pending' ? 'warn' : 'danger'" />
+            </td>
+            <td>{{ cert.expires_at ? (cert.expires_at | date:'dd.MM.yyyy') : '-' }}</td>
+            <td>{{ cert.wildcard ? 'Wildcard' : 'Standard' }}</td>
+            <td>
+                <p-button icon="pi pi-refresh" [text]="true" [rounded]="true" (onClick)="renewCert(cert)" pTooltip="Yenile" />
+                <p-button icon="pi pi-trash" [text]="true" [rounded]="true" severity="danger" (onClick)="deleteCert(cert)" pTooltip="Sil" />
+            </td>
+        </tr>
+    </ng-template>
+    <ng-template #emptymessage>
+        <tr><td colspan="5" class="text-center p-4">Sertifika bulunamadı</td></tr>
+    </ng-template>
+</p-table>
+
+<!-- Request Dialog -->
+<p-dialog [(visible)]="requestDialogVisible" header="Yeni SSL Sertifikası" [modal]="true" [style]="{width: '580px'}">
+    @if (!dnsChallenge()) {
+        <div class="flex flex-col gap-4">
+            <div class="flex flex-col gap-1">
+                <label class="font-medium">Domain</label>
+                <input pInputText [(ngModel)]="reqForm.domain" placeholder="ornek.com veya *.ornek.com" />
+            </div>
+            <div class="flex flex-col gap-1">
+                <label class="font-medium">E-posta (Let's Encrypt)</label>
+                <input pInputText [(ngModel)]="reqForm.email" type="email" placeholder="admin@ornek.com" />
+            </div>
+            <div class="flex flex-col gap-1">
+                <label class="font-medium">Sertifika Türü</label>
+                <p-select [(ngModel)]="reqForm.ssl_type" [options]="sslTypes" optionLabel="label" optionValue="value" />
+            </div>
+            <div class="flex flex-col gap-1">
+                <label class="font-medium">DNS Sağlayıcı</label>
+                <p-select [(ngModel)]="reqForm.dns_provider" [options]="dnsProviders" optionLabel="label" optionValue="value" />
+            </div>
+            @if (reqForm.dns_provider === 'cloudflare') {
+                <div class="flex flex-col gap-1">
+                    <label class="font-medium">Cloudflare API Key</label>
+                    <input pInputText [(ngModel)]="reqForm.cloudflare_api_key" type="password" placeholder="CF_Key..." />
+                </div>
+            }
+            @if (reqForm.dns_provider === 'he') {
+                <div class="flex flex-col gap-1">
+                    <label class="font-medium">HE.net Kullanıcı Adı</label>
+                    <input pInputText [(ngModel)]="reqForm.he_username" placeholder="kullanici@ornek.com" />
+                </div>
+                <div class="flex flex-col gap-1">
+                    <label class="font-medium">HE.net Şifre</label>
+                    <input pInputText [(ngModel)]="reqForm.he_password" type="password" />
+                </div>
+            }
+        </div>
+    } @else {
+        <div class="flex flex-col gap-3">
+            <p-message severity="info" text="Aşağıdaki DNS TXT kaydını ekleyin, ardından Doğrula butonuna tıklayın" />
+            <div class="bg-surface-100 dark:bg-surface-800 p-4 rounded-lg font-mono text-sm">
+                <div><strong>Tür:</strong> TXT</div>
+                <div><strong>Alan Adı:</strong> {{ dnsChallenge()!.txt_domain }}</div>
+                <div><strong>Değer:</strong> {{ dnsChallenge()!.txt_value }}</div>
+            </div>
+            <div class="flex flex-col gap-1">
+                <label class="font-medium">DNS Token (doğrulama için)</label>
+                <input pInputText [(ngModel)]="verifyToken" placeholder="DNS token..." />
+            </div>
+        </div>
+    }
+    <ng-template #footer>
+        <p-button label="İptal" [text]="true" (onClick)="requestDialogVisible = false; dnsChallenge.set(null)" />
+        @if (!dnsChallenge()) {
+            <p-button label="Sertifika İste" [loading]="requesting()" (onClick)="requestCert()" />
+        } @else {
+            <p-button label="DNS Kaydını Doğrula" [loading]="requesting()" (onClick)="verifyCert()" />
+        }
+    </ng-template>
+</p-dialog>

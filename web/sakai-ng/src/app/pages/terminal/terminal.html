@@ -1,0 +1,19 @@
+<p-toast />
+<p-toolbar styleClass="mb-4">
+    <ng-template #start>
+        <h2 class="text-xl font-semibold m-0">Terminal</h2>
+        <p-tag [value]="connected() ? 'Bağlı' : 'Bağlı Değil'" [severity]="connected() ? 'success' : 'danger'" styleClass="ml-3" />
+    </ng-template>
+    <ng-template #end>
+        @if (!connected()) {
+            <p-button label="Bağlan" icon="pi pi-play" (onClick)="connect()" [loading]="connecting()" />
+        } @else {
+            <p-button label="Bağlantıyı Kes" icon="pi pi-stop" severity="danger" [outlined]="true" styleClass="mr-2" (onClick)="disconnect()" />
+            <p-button label="Temizle" icon="pi pi-eraser" [outlined]="true" (onClick)="clearTerminal()" />
+        }
+    </ng-template>
+</p-toolbar>
+
+<div class="terminal-wrapper">
+    <div id="terminal-container" #terminalEl></div>
+</div>

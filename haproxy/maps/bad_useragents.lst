@@ -1,0 +1,7 @@
+sqlmap
+nikto
+acunetix
+dirbuster
+curl/
+wget/
+python-requests

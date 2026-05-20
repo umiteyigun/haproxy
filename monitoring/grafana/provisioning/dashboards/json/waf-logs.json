@@ -1,0 +1,73 @@
+{
+  "id": null,
+  "uid": "waf-logs",
+  "title": "WAF Logs",
+  "tags": ["waf", "logs"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "editable": true,
+  "panels": [
+    {
+      "type": "logs",
+      "title": "HAProxy Logs",
+      "id": 1,
+      "datasource": {
+        "type": "loki",
+        "uid": "-100"
+      },
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "showCommonLabels": true,
+        "showLabels": true
+      },
+      "targets": [
+        {
+          "expr": "{job=\"haproxy\"}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "type": "logs",
+      "title": "ModSecurity Logs",
+      "id": 2,
+      "datasource": {
+        "type": "loki",
+        "uid": "-100"
+      },
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "showCommonLabels": true,
+        "showLabels": true
+      },
+      "targets": [
+        {
+          "expr": "{job=\"modsecurity\"}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 12
+      }
+    }
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  }
+}

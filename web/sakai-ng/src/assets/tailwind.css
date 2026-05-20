@@ -1,0 +1,8 @@
+@import "tailwindcss";
+@import "tailwindcss-primeui";
+
+/* Scan Angular inline templates in TypeScript files */
+@source "../app/**/*.ts";
+
+/* Map Tailwind dark: variant to PrimeNG's .app-dark class */
+@variant dark (.app-dark &);

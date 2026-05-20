@@ -1,0 +1,43 @@
+[DEFAULT]
+# Ban settings
+bantime  = 1h
+findtime = 10m
+maxretry = 5
+
+# Action
+banaction = iptables-multiport
+action = %(action_mwl)s
+
+# Logging
+loglevel = INFO
+logtarget = /tmp/fail2ban.log
+
+# Database
+dbfile = /var/lib/fail2ban/fail2ban.sqlite3
+dbpurgeage = 7d
+
+[sshd]
+enabled = false
+port = 22
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 3
+bantime = 24h
+findtime = 10m
+
+[haproxy-http-auth]
+enabled = true
+port = http,https
+filter = haproxy-http-auth
+logpath = /logs/haproxy/haproxy.log
+maxretry = 5
+bantime = 1h
+
+[haproxy-rate-limit]
+enabled = true
+port = http,https
+filter = haproxy-rate-limit
+logpath = /logs/haproxy/haproxy.log
+maxretry = 10
+bantime = 30m
+findtime = 1m

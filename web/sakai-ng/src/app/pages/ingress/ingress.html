@@ -1,0 +1,190 @@
+<p-toast />
+<p-confirmDialog />
+<p-toolbar styleClass="mb-4">
+    <ng-template #start>
+        <h2 class="text-xl font-semibold m-0">Ingress Kuralları</h2>
+    </ng-template>
+    <ng-template #end>
+        <p-iconfield class="mr-2">
+            <p-inputicon styleClass="pi pi-search" />
+            <input pInputText [(ngModel)]="filterText" placeholder="Ara..." (ngModelChange)="dt.filterGlobal($event, 'contains')" />
+        </p-iconfield>
+        <p-button icon="pi pi-refresh" label="Yenile" severity="secondary" styleClass="mr-2" (onClick)="load()" [loading]="loading()" />
+        <p-button label="Yeni Kural" icon="pi pi-plus" (onClick)="openNew()" />
+    </ng-template>
+</p-toolbar>
+
+<p-table #dt [value]="rules()" [loading]="loading()" [globalFilterFields]="globalFilterFields" styleClass="p-datatable-sm"
+    [rows]="25" [paginator]="true" [rowsPerPageOptions]="[10, 25, 50, 100]"
+    [showFirstLastIcon]="true" [showCurrentPageReport]="true"
+    currentPageReportTemplate="Toplam {totalRecords} kayıttan {first}-{last} gösteriliyor"
+    [sortMode]="'multiple'">
+    <ng-template pTemplate="loadingicon">
+        <p-progressSpinner strokeWidth="4" animationDuration=".8s" styleClass="w-4rem h-4rem" />
+    </ng-template>
+    <ng-template #header>
+        <tr>
+            <th pSortableColumn="name">
+                <div class="flex items-center gap-1">İsim <p-sortIcon field="name" /><p-columnFilter type="text" field="name" display="menu" /></div>
+            </th>
+            <th pSortableColumn="domain">
+                <div class="flex items-center gap-1">Domain <p-sortIcon field="domain" /><p-columnFilter type="text" field="domain" display="menu" /></div>
+            </th>
+            <th pSortableColumn="backend_host">
+                <div class="flex items-center gap-1">Backend <p-sortIcon field="backend_host" /><p-columnFilter type="text" field="backend_host" display="menu" /></div>
+            </th>
+            <th pSortableColumn="backend_protocol">
+                <div class="flex items-center gap-1">Protokol <p-sortIcon field="backend_protocol" /><p-columnFilter type="text" field="backend_protocol" display="menu" /></div>
+            </th>
+            <th pSortableColumn="ssl_enabled">
+                <div class="flex items-center gap-1">SSL <p-sortIcon field="ssl_enabled" /><p-columnFilter type="boolean" field="ssl_enabled" display="menu" /></div>
+            </th>
+            <th pSortableColumn="lb_mode">
+                <div class="flex items-center gap-1">LB Modu <p-sortIcon field="lb_mode" /><p-columnFilter type="text" field="lb_mode" display="menu" /></div>
+            </th>
+            <th>İşlem</th>
+        </tr>
+    </ng-template>
+    <ng-template #body let-rule>
+        <tr>
+            <td>{{ rule.name }}</td>
+            <td><strong>{{ rule.domain }}</strong>{{ rule.path ? rule.path : '' }}</td>
+            <td>{{ rule.backend_host }}:{{ rule.backend_port }}</td>
+            <td>{{ rule.backend_protocol || 'http' }}</td>
+            <td>
+                <p-tag [value]="rule.ssl_enabled ? 'SSL' : 'HTTP'" [severity]="rule.ssl_enabled ? 'success' : 'secondary'" />
+            </td>
+            <td>{{ rule.lb_mode || 'roundrobin' }}</td>
+            <td>
+                <p-button icon="pi pi-pencil" [text]="true" [rounded]="true" (onClick)="editRule(rule)" pTooltip="Düzenle" />
+                <p-button icon="pi pi-trash" [text]="true" [rounded]="true" severity="danger" (onClick)="deleteRule(rule)" pTooltip="Sil" />
+            </td>
+        </tr>
+    </ng-template>
+    <ng-template #emptymessage>
+        <tr><td colspan="7" class="text-center p-4">Ingress kuralı bulunamadı</td></tr>
+    </ng-template>
+</p-table>
+
+<p-dialog [(visible)]="dialogVisible" [header]="editMode() ? 'Kural Düzenle' : 'Yeni Kural'" [modal]="true" [style]="{width: '620px'}" [draggable]="false">
+    <div class="flex flex-col gap-4">
+
+        <!-- İsim & Domain -->
+        <div class="flex flex-col gap-1">
+            <label class="font-medium">İsim <span class="text-red-500">*</span></label>
+            <input pInputText [(ngModel)]="form.name" placeholder="my-app" />
+        </div>
+        <div class="flex flex-col gap-1">
+            <label class="font-medium">Domain <span class="text-red-500">*</span></label>
+            <input pInputText [(ngModel)]="form.domain" placeholder="ornek.com" />
+        </div>
+        <div class="flex flex-col gap-1">
+            <label class="font-medium">Path <span class="text-gray-400 text-sm">(Opsiyonel)</span></label>
+            <input pInputText [(ngModel)]="form.path" placeholder="/api" />
+        </div>
+
+        <p-divider />
+
+        <!-- Backend -->
+        <div class="flex flex-col gap-1">
+            <label class="font-medium">Backend Host <span class="text-red-500">*</span></label>
+            <input pInputText [(ngModel)]="form.backend_host" placeholder="192.168.1.10" />
+        </div>
+        <div class="flex flex-col gap-1">
+            <label class="font-medium">Backend Port <span class="text-red-500">*</span></label>
+            <input pInputText [(ngModel)]="form.backend_port" placeholder="8080" type="number" />
+        </div>
+        <div class="flex flex-col gap-1">
+            <label class="font-medium">Backend Protokolü</label>
+            <p-select [(ngModel)]="form.backend_protocol" [options]="backendProtocols" optionLabel="label" optionValue="value" />
+            <small class="text-gray-400">Arka sunucu SSL kullanıyorsa HTTPS seçin (sertifika doğrulaması yapılmaz)</small>
+        </div>
+        <div class="flex flex-col gap-1">
+            <label class="font-medium">Load Balancing Modu</label>
+            <p-select [(ngModel)]="form.lb_mode" [options]="lbModes" optionLabel="label" optionValue="value" />
+            <small class="text-gray-400">Failover modunda ilk sunucu ana, diğerleri yedek olarak kullanılır</small>
+        </div>
+        <div class="flex flex-col gap-1">
+            <label class="font-medium">Ek Backend Sunucuları</label>
+            <textarea pTextarea [(ngModel)]="form.extra_backends" rows="3" placeholder="host2:80&#10;host3:8080" style="font-family: monospace; font-size: 0.875rem;"></textarea>
+            <small class="text-gray-400">Her satıra bir <code>host:port</code>. Failover modunda bu sunucular ana sunucuya yedek olarak eklenir.</small>
+        </div>
+
+        <p-divider />
+
+        <!-- SSL -->
+        <div class="flex flex-col gap-2">
+            <label class="font-medium">SSL Sertifikası</label>
+            <div class="flex flex-col gap-2">
+                <div class="flex items-center gap-2">
+                    <p-radiobutton name="ssl_type" value="none" [(ngModel)]="form.ssl_type" inputId="sslNone" (onClick)="onSslTypeChange()" />
+                    <label for="sslNone">SSL Yok (HTTP)</label>
+                </div>
+                <div class="flex items-center gap-2">
+                    <p-radiobutton name="ssl_type" value="select" [(ngModel)]="form.ssl_type" inputId="sslSelect" (onClick)="onSslTypeChange()" />
+                    <label for="sslSelect">Mevcut SSL Sertifikası Kullan</label>
+                </div>
+                <div class="flex items-center gap-2">
+                    <p-radiobutton name="ssl_type" value="new" [(ngModel)]="form.ssl_type" inputId="sslNew" (onClick)="onSslTypeChange()" />
+                    <label for="sslNew">Yeni SSL Sertifikası Al</label>
+                </div>
+            </div>
+        </div>
+
+        @if (form.ssl_type === 'select') {
+            <div class="flex flex-col gap-1">
+                <label class="font-medium">SSL Sertifikası Seç <span class="text-red-500">*</span></label>
+                <p-select [(ngModel)]="form.ssl_cert_id" [options]="certOptions()" optionLabel="label" optionValue="value" placeholder="Sertifika seçiniz..." />
+                <small class="text-gray-400">Wildcard SSL'ler uyumlu domain'lerde kullanılabilir</small>
+            </div>
+        }
+
+        @if (form.ssl_type === 'new') {
+            <div class="flex flex-col gap-2">
+                <label class="font-medium">SSL Tipi</label>
+                <div class="flex flex-col gap-2">
+                    <div class="flex items-center gap-2">
+                        <p-radiobutton name="new_ssl_type" value="normal" [(ngModel)]="form.new_ssl_type" inputId="newSslNormal" />
+                        <label for="newSslNormal">Normal SSL (domain.com) - Webroot Challenge</label>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <p-radiobutton name="new_ssl_type" value="wildcard" [(ngModel)]="form.new_ssl_type" inputId="newSslWildcard" />
+                        <label for="newSslWildcard">Wildcard SSL (*.domain.com) - DNS Challenge</label>
+                    </div>
+                </div>
+            </div>
+        }
+
+        @if (form.ssl_type === 'new' && form.new_ssl_type === 'wildcard') {
+            <div class="flex flex-col gap-3">
+                <div class="flex flex-col gap-1">
+                    <label class="font-medium">DNS Provider <span class="text-red-500">*</span></label>
+                    <p-select [(ngModel)]="form.dns_provider" [options]="dnsProviders" optionLabel="label" optionValue="value" placeholder="Seçiniz..." />
+                    <small class="text-gray-400">DNS credentials .ini dosyası gerektirir (HE.net hariç)</small>
+                </div>
+                @if (form.dns_provider === 'he-net') {
+                    <div class="flex flex-col gap-1">
+                        <label class="font-medium">HE.net Username <span class="text-red-500">*</span></label>
+                        <input pInputText [(ngModel)]="form.he_username" placeholder="HE.net kullanıcı adı" />
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label class="font-medium">HE.net Password/Key <span class="text-red-500">*</span></label>
+                        <input pInputText type="password" [(ngModel)]="form.he_password" placeholder="Şifre veya Dynamic DNS Key" />
+                    </div>
+                }
+            </div>
+        }
+
+        @if (form.ssl_type !== 'none') {
+            <div class="flex items-center gap-3">
+                <p-toggleswitch [(ngModel)]="form.redirect_to_https" inputId="redirectHttps" />
+                <label for="redirectHttps" class="font-medium">HTTP (80) isteklerini bu domain için HTTPS'e yönlendir</label>
+            </div>
+        }
+
+    </div>
+    <ng-template #footer>
+        <p-button label="İptal" [text]="true" (onClick)="dialogVisible = false" />
+        <p-button label="Kaydet" [loading]="saving()" (onClick)="save()" />
+    </ng-template>
+</p-dialog>

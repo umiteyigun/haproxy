@@ -1,0 +1,261 @@
+<p-toast />
+<p-confirmDialog />
+
+<p-tabs value="0">
+    <p-tablist>
+        <p-tab value="0">Özel Kurallar</p-tab>
+        <p-tab value="1">OWASP CRS Kuralları</p-tab>
+        <p-tab value="2">
+            <span class="flex items-center gap-2">
+                <i class="pi pi-eye"></i>
+                Otomatik Keşfedilen WAF Kuralları
+                @if (wafEvents().length > 0) {
+                    <p-tag [value]="wafEvents().length + ''" severity="danger" styleClass="text-xs" />
+                }
+            </span>
+        </p-tab>
+    </p-tablist>
+    <p-tabpanels>
+    <p-tabpanel value="0">
+        <p-toolbar styleClass="mb-4">
+            <ng-template #start>
+                <h3 class="m-0 font-semibold">WAF Özel Kuralları</h3>
+            </ng-template>
+            <ng-template #end>
+                <p-iconfield class="mr-2">
+                    <p-inputicon styleClass="pi pi-search" />
+                    <input pInputText [(ngModel)]="filterTextRules" placeholder="Ara..." (ngModelChange)="dtRules.filterGlobal($event, 'contains')" />
+                </p-iconfield>
+                <p-button icon="pi pi-refresh" label="Yenile" severity="secondary" styleClass="mr-2" (onClick)="loadRules()" [loading]="loadingRules()" />
+                <p-button label="Yeni Kural" icon="pi pi-plus" (onClick)="openNew()" />
+                <p-button label="SPOA Yenile" icon="pi pi-sync" [outlined]="true" styleClass="ml-2" (onClick)="reloadSpoa()" [loading]="reloading()" />
+            </ng-template>
+        </p-toolbar>
+        <p-table #dtRules [value]="rules()" [loading]="loadingRules()" [globalFilterFields]="globalFilterFieldsRules" styleClass="p-datatable-sm"
+            [rows]="25" [paginator]="true" [rowsPerPageOptions]="[10, 25, 50, 100]"
+            [showFirstLastIcon]="true" [showCurrentPageReport]="true"
+            currentPageReportTemplate="Toplam {totalRecords} kayıttan {first}-{last} gösteriliyor"
+            [sortMode]="'multiple'" >
+            <ng-template pTemplate="loadingicon">
+                <p-progressSpinner strokeWidth="4" animationDuration=".8s" styleClass="w-4rem h-4rem" />
+            </ng-template>
+            <ng-template #header>
+                <tr>
+                    <th pSortableColumn="filename">
+                        <div class="flex items-center gap-1">Dosya Adı <p-sortIcon field="filename" /><p-columnFilter type="text" field="filename" display="menu" /></div>
+                    </th>
+                    <th pSortableColumn="size">
+                        <div class="flex items-center gap-1">Boyut <p-sortIcon field="size" /><p-columnFilter type="numeric" field="size" display="menu" /></div>
+                    </th>
+                    <th pSortableColumn="modified">
+                        <div class="flex items-center gap-1">Son Değişiklik <p-sortIcon field="modified" /><p-columnFilter type="text" field="modified" display="menu" /></div>
+                    </th>
+                    <th pSortableColumn="enabled">
+                        <div class="flex items-center gap-1">Durum <p-sortIcon field="enabled" /><p-columnFilter type="boolean" field="enabled" display="menu" /></div>
+                    </th>
+                    <th>İşlem</th>
+                </tr>
+            </ng-template>
+            <ng-template #body let-rule>
+                <tr>
+                    <td><code>{{ rule.filename }}</code></td>
+                    <td>{{ rule.size ? (rule.size + ' B') : '-' }}</td>
+                    <td>{{ rule.modified || '-' }}</td>
+                    <td>
+                        <p-tag [value]="rule.enabled ? 'Aktif' : 'Pasif'" [severity]="rule.enabled ? 'success' : 'secondary'" />
+                    </td>
+                    <td>
+                        <p-button icon="pi pi-pencil" [text]="true" [rounded]="true" (onClick)="editRule(rule)" />
+                        <p-button icon="pi pi-trash" [text]="true" [rounded]="true" severity="danger" (onClick)="deleteRule(rule)" />
+                    </td>
+                </tr>
+            </ng-template>
+            <ng-template #emptymessage>
+                <tr><td colspan="5" class="text-center p-4">Özel kural bulunamadı</td></tr>
+            </ng-template>
+        </p-table>
+    </p-tabpanel>
+
+    <p-tabpanel value="1">
+        <p-toolbar styleClass="mb-4">
+            <ng-template #start>
+                <h3 class="m-0 font-semibold">OWASP CRS Kuralları</h3>
+            </ng-template>
+            <ng-template #end>
+                <p-iconfield class="mr-2">
+                    <p-inputicon styleClass="pi pi-search" />
+                    <input pInputText [(ngModel)]="filterTextCrs" placeholder="Ara..." (ngModelChange)="dtCrs.filterGlobal($event, 'contains')" />
+                </p-iconfield>
+                <p-button icon="pi pi-refresh" label="Yenile" severity="secondary" (onClick)="loadCrs()" [loading]="loadingCrs()" />
+            </ng-template>
+        </p-toolbar>
+        <p-table #dtCrs [value]="crsRules()" [loading]="loadingCrs()" [globalFilterFields]="globalFilterFieldsCrs" styleClass="p-datatable-sm"
+            [rows]="25" [paginator]="true" [rowsPerPageOptions]="[10, 25, 50, 100]"
+            [showFirstLastIcon]="true" [showCurrentPageReport]="true"
+            currentPageReportTemplate="Toplam {totalRecords} kayıttan {first}-{last} gösteriliyor"
+            [sortMode]="'multiple'" >
+            <ng-template pTemplate="loadingicon">
+                <p-progressSpinner strokeWidth="4" animationDuration=".8s" styleClass="w-4rem h-4rem" />
+            </ng-template>
+            <ng-template #header>
+                <tr>
+                    <th pSortableColumn="filename">
+                        <div class="flex items-center gap-1">Dosya Adı <p-sortIcon field="filename" /><p-columnFilter type="text" field="filename" display="menu" /></div>
+                    </th>
+                    <th pSortableColumn="size">
+                        <div class="flex items-center gap-1">Boyut <p-sortIcon field="size" /></div>
+                    </th>
+                    <th>Durum</th>
+                    <th>İşlem</th>
+                </tr>
+            </ng-template>
+            <ng-template #body let-rule>
+                <tr>
+                    <td><code>{{ rule.filename }}</code></td>
+                    <td>{{ rule.size ? (rule.size + ' B') : '-' }}</td>
+                    <td>
+                        <p-toggleswitch [(ngModel)]="rule.enabled" (onChange)="toggleCrs(rule)" />
+                    </td>
+                    <td>
+                        <p-button icon="pi pi-pencil" [text]="true" [rounded]="true" (onClick)="openEditCrs(rule)" pTooltip="Düzenle" tooltipPosition="top" />
+                    </td>
+                </tr>
+            </ng-template>
+            <ng-template #emptymessage>
+                <tr><td colspan="4" class="text-center p-4">CRS kuralı bulunamadı</td></tr>
+            </ng-template>
+        </p-table>
+    </p-tabpanel>
+
+    <!-- Tab 2: Otomatik Keşfedilen WAF Kuralları (ModSecurity Events) -->
+    <p-tabpanel value="2">
+        <p-toolbar styleClass="mb-4">
+            <ng-template #start>
+                <h3 class="m-0 font-semibold">Otomatik Keşfedilen WAF Kuralları</h3>
+                <small class="text-color-secondary ml-3">ModSecurity denetim günlüğünden otomatik algılanan olaylar</small>
+            </ng-template>
+            <ng-template #end>
+                <p-select [(ngModel)]="eventsLimit"
+                    [options]="[{label: '50 Kayıt', value: 50}, {label: '100 Kayıt', value: 100}, {label: '200 Kayıt', value: 200}, {label: '500 Kayıt', value: 500}]"
+                    optionLabel="label" optionValue="value" styleClass="mr-2" />
+                <p-button icon="pi pi-refresh" label="Yenile" severity="secondary"
+                    (onClick)="loadEvents()" [loading]="loadingEvents()" />
+            </ng-template>
+        </p-toolbar>
+
+        @if (eventsMessage) {
+            <p-message severity="warn" [text]="eventsMessage" styleClass="w-full mb-4" />
+        }
+
+        <p-table [value]="wafEvents()" [loading]="loadingEvents()" styleClass="p-datatable-sm"
+            [rows]="25" [paginator]="true" [rowsPerPageOptions]="[10, 25, 50, 100]"
+            [showCurrentPageReport]="true"
+            currentPageReportTemplate="Toplam {totalRecords} olaydan {first}-{last} gösteriliyor"
+            sortMode="multiple">
+            <ng-template pTemplate="loadingicon">
+                <p-progressSpinner strokeWidth="4" animationDuration=".8s" styleClass="w-4rem h-4rem" />
+            </ng-template>
+            <ng-template #header>
+                <tr>
+                    <th pSortableColumn="timestamp" style="min-width:160px">
+                        <span class="flex items-center gap-1">Zaman <p-sortIcon field="timestamp" /></span>
+                    </th>
+                    <th pSortableColumn="client_ip" style="min-width:130px">
+                        <span class="flex items-center gap-1">İstemci IP <p-sortIcon field="client_ip" /></span>
+                    </th>
+                    <th pSortableColumn="method" style="width:90px">
+                        <span class="flex items-center gap-1">Metod <p-sortIcon field="method" /></span>
+                    </th>
+                    <th pSortableColumn="uri">
+                        <span class="flex items-center gap-1">URI <p-sortIcon field="uri" /></span>
+                    </th>
+                    <th pSortableColumn="rule_id" style="width:110px">
+                        <span class="flex items-center gap-1">Kural ID <p-sortIcon field="rule_id" /></span>
+                    </th>
+                    <th>Mesaj</th>
+                    <th pSortableColumn="severity" style="width:120px">
+                        <span class="flex items-center gap-1">Seviye <p-sortIcon field="severity" /></span>
+                    </th>
+                    <th style="width:100px">Eylem</th>
+                </tr>
+            </ng-template>
+            <ng-template #body let-ev>
+                <tr>
+                    <td class="text-sm">{{ ev.timestamp || '-' }}</td>
+                    <td><code class="text-sm">{{ ev.client_ip || '-' }}</code></td>
+                    <td>
+                        @if (ev.method) {
+                            <p-tag [value]="ev.method" severity="info" />
+                        } @else { <span>-</span> }
+                    </td>
+                    <td class="text-sm" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                        [pTooltip]="ev.uri" tooltipPosition="top">{{ ev.uri || '-' }}</td>
+                    <td>
+                        @if (ev.rule_id) {
+                            <code class="text-sm">{{ ev.rule_id }}</code>
+                        } @else { <span>-</span> }
+                    </td>
+                    <td class="text-sm" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                        [pTooltip]="ev.message" tooltipPosition="top">{{ ev.message || '-' }}</td>
+                    <td>
+                        <p-tag [value]="ev.severity || 'Unknown'" [severity]="eventSeverityTag(ev.severity)" />
+                    </td>
+                    <td>
+                        <p-tag [value]="ev.action || 'Detection'" severity="secondary" />
+                    </td>
+                </tr>
+            </ng-template>
+            <ng-template #emptymessage>
+                <tr>
+                    <td colspan="8" class="text-center p-6">
+                        <div class="flex flex-col items-center gap-2 text-color-secondary">
+                            <i class="pi pi-shield text-4xl"></i>
+                            <span>WAF olayı bulunamadı. ModSecurity denetim günlüğü henüz dolu değil veya bağlı değil.</span>
+                        </div>
+                    </td>
+                </tr>
+            </ng-template>
+        </p-table>
+    </p-tabpanel>
+    </p-tabpanels>
+</p-tabs>
+<p-dialog [(visible)]="dialogVisible" [header]="editMode() ? 'Kural Düzenle' : 'Yeni WAF Kuralı'" [modal]="true" [style]="{width: '600px'}">
+    <div class="flex flex-col gap-4">
+        <div class="flex flex-col gap-1">
+            <label class="font-medium">Dosya Adı (.conf)</label>
+            <input pInputText [(ngModel)]="form.filename" placeholder="kural-adi.conf" [disabled]="editMode()" />
+        </div>
+        <div class="flex flex-col gap-1">
+            <label class="font-medium">Kural İçeriği (ModSecurity)</label>
+            <textarea pTextarea [(ngModel)]="form.content" rows="8" placeholder="SecRule REQUEST_URI ..."></textarea>
+        </div>
+    </div>
+    <ng-template #footer>
+        <p-button label="İptal" [text]="true" (onClick)="dialogVisible = false" />
+        <p-button label="Kaydet" [loading]="saving()" (onClick)="save()" />
+    </ng-template>
+</p-dialog>
+
+<!-- CRS Rule Edit Dialog -->
+<p-dialog [(visible)]="crsDialogVisible" [header]="'CRS Kuralı Düzenle: ' + crsEditFilename" [modal]="true" [style]="{width: '800px'}">
+    <div class="flex flex-col gap-4">
+        @if (loadingCrsContent()) {
+            <div class="flex justify-center p-6">
+                <p-progressSpinner strokeWidth="4" animationDuration=".8s" styleClass="w-4rem h-4rem" />
+            </div>
+        } @else {
+            <div class="flex flex-col gap-1">
+                <label class="font-medium flex justify-between">
+                    <span>İçerik</span>
+                    <small class="text-muted">ModSecurity SecRule Syntax</small>
+                </label>
+                <textarea pTextarea [(ngModel)]="crsEditContent" rows="18" spellcheck="false" style="font-family: monospace; font-size: 0.85rem;"></textarea>
+            </div>
+            <p-message severity="warn" text="Dikkat: Yanlış sözdizimi HAProxy/SPOA servisinin başlamasını engelleyebilir." styleClass="w-full" />
+        }
+    </div>
+    <ng-template #footer>
+        <p-button label="İptal" [text]="true" (onClick)="crsDialogVisible = false" />
+        <p-button label="Kaydet" [loading]="savingCrs()" [disabled]="loadingCrsContent()" (onClick)="saveCrs()" />
+    </ng-template>
+</p-dialog>
