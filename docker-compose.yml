@@ -79,9 +79,7 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:8088:80" # Web UI exposed to localhost for HAProxy to reach
-    volumes:
-      - ./web:/var/www/html:ro
-      - ./certbot/www:/var/www/html/.well-known/acme-challenge:ro
+    # Angular build is baked into the image; no host bind mounts needed
     depends_on:
       - api
     networks:
