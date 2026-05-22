@@ -1,4 +1,4 @@
-﻿import { Component, OnInit, OnDestroy, signal, inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
@@ -45,7 +45,7 @@ export class LogsPage implements OnInit, OnDestroy {
             const res = await this.logsService.getLogs();
             this.logs.set(res?.logs ?? []);
         } catch {
-            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Loglar y�klenemedi' });
+            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Loglar yüklenemedi' });
         } finally {
             this.loading.set(false);
         }

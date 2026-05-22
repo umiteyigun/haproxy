@@ -1,4 +1,4 @@
-﻿import { Component, OnInit, signal, inject } from '@angular/core';
+import { Component, OnInit, signal, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
@@ -54,7 +54,7 @@ export class MembersPage implements OnInit {
             const data = await this.service.getMembers();
             this.members.set(data);
         } catch {
-            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Kullan�c�lar y�klenemedi' });
+            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Kullanıcılar yüklenemedi' });
         } finally {
             this.loading.set(false);
         }
@@ -67,17 +67,17 @@ export class MembersPage implements OnInit {
 
     async createMember() {
         if (!this.newForm.email || !this.newForm.password) {
-            this.msg.add({ severity: 'warn', summary: 'Uyar�', detail: 'E-posta ve �ifre zorunludur' });
+            this.msg.add({ severity: 'warn', summary: 'Uyarı', detail: 'E-posta ve şifre zorunludur' });
             return;
         }
         this.saving.set(true);
         try {
             await this.service.createMember(this.newForm);
-            this.msg.add({ severity: 'success', summary: 'Olu�turuldu' });
+            this.msg.add({ severity: 'success', summary: 'Oluşturuldu' });
             this.newDialogVisible = false;
             await this.load();
         } catch {
-            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Kullan�c� olu�turulamad�' });
+            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Kullanıcı oluşturulamadı' });
         } finally {
             this.saving.set(false);
         }
@@ -98,7 +98,7 @@ export class MembersPage implements OnInit {
 
     async changePassword() {
         if (!this.passForm.newPass) {
-            this.msg.add({ severity: 'warn', summary: 'Uyar�', detail: 'Yeni �ifre zorunludur' });
+            this.msg.add({ severity: 'warn', summary: 'Uyarı', detail: 'Yeni şifre zorunludur' });
             return;
         }
         this.saving.set(true);
@@ -108,10 +108,10 @@ export class MembersPage implements OnInit {
             } else if (this.selectedMemberId !== null) {
                 await this.service.updateMemberPassword(this.selectedMemberId, this.passForm.newPass);
             }
-            this.msg.add({ severity: 'success', summary: '�ifre g�ncellendi' });
+            this.msg.add({ severity: 'success', summary: 'Şifre güncellendi' });
             this.passDialogVisible = false;
         } catch {
-            this.msg.add({ severity: 'error', summary: 'Hata', detail: '�ifre g�ncellenemedi' });
+            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Şifre güncellenemedi' });
         } finally {
             this.saving.set(false);
         }
@@ -119,8 +119,8 @@ export class MembersPage implements OnInit {
 
     deleteMember(member: Member) {
         this.confirm.confirm({
-            message: `"${member.email}" kullan�c�s�n� silmek istedi�inize emin misiniz?`,
-            header: 'Silme Onay�',
+            message: `"${member.email}" kullanıcısını silmek istediğinize emin misiniz?`,
+            header: 'Silme Onayı',
             icon: 'pi pi-exclamation-triangle',
             accept: async () => {
                 try {
@@ -128,7 +128,7 @@ export class MembersPage implements OnInit {
                     this.msg.add({ severity: 'success', summary: 'Silindi' });
                     await this.load();
                 } catch {
-                    this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Silme ba�ar�s�z' });
+                    this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Silme başarısız' });
                 }
             }
         });

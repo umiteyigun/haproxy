@@ -1,4 +1,4 @@
-﻿import { Component, OnInit, signal, inject } from '@angular/core';
+import { Component, OnInit, signal, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
@@ -66,7 +66,7 @@ export class SslPage implements OnInit {
             const data = await this.service.getCertificates();
             this.certs.set(data);
         } catch {
-            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Sertifikalar y�klenemedi' });
+            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Sertifikalar yüklenemedi' });
         } finally {
             this.loading.set(false);
         }
@@ -80,7 +80,7 @@ export class SslPage implements OnInit {
 
     async requestCert() {
         if (!this.reqForm.domain) {
-            this.msg.add({ severity: 'warn', summary: 'Uyar�', detail: 'Domain zorunludur' });
+            this.msg.add({ severity: 'warn', summary: 'Uyarı', detail: 'Domain zorunludur' });
             return;
         }
         this.requesting.set(true);
@@ -88,14 +88,14 @@ export class SslPage implements OnInit {
             const result: any = await this.service.requestCertificate(this.reqForm);
             if (result?.challenge) {
                 this.dnsChallenge.set(result.challenge);
-                this.msg.add({ severity: 'info', summary: 'DNS Kayd� Gerekli', detail: 'DNS TXT kayd�n� ekleyin' });
+                this.msg.add({ severity: 'info', summary: 'DNS Kaydı Gerekli', detail: 'DNS TXT kaydını ekleyin' });
             } else {
-                this.msg.add({ severity: 'success', summary: 'Ba�ar�l�', detail: 'Sertifika olu�turuldu' });
+                this.msg.add({ severity: 'success', summary: 'Başarılı', detail: 'Sertifika oluşturuldu' });
                 this.requestDialogVisible = false;
                 await this.load();
             }
         } catch {
-            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Sertifika iste�i ba�ar�s�z' });
+            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Sertifika isteği başarısız' });
         } finally {
             this.requesting.set(false);
         }
@@ -105,12 +105,12 @@ export class SslPage implements OnInit {
         this.requesting.set(true);
         try {
             await this.service.verifyCertificate({ domain: this.reqForm.domain, token: this.verifyToken });
-            this.msg.add({ severity: 'success', summary: 'Ba�ar�l�', detail: 'Sertifika do�ruland� ve olu�turuldu' });
+            this.msg.add({ severity: 'success', summary: 'Başarılı', detail: 'Sertifika doğrulandı ve oluşturuldu' });
             this.requestDialogVisible = false;
             this.dnsChallenge.set(null);
             await this.load();
         } catch {
-            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Do�rulama ba�ar�s�z' });
+            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Doğrulama başarısız' });
         } finally {
             this.requesting.set(false);
         }
@@ -119,10 +119,10 @@ export class SslPage implements OnInit {
     async renewCert(cert: Certificate) {
         try {
             await this.service.renewCertificate(cert.domain);
-            this.msg.add({ severity: 'success', summary: 'Yenilendi', detail: `${cert.domain} sertifikas� yenilendi` });
+            this.msg.add({ severity: 'success', summary: 'Yenilendi', detail: `${cert.domain} sertifikası yenilendi` });
             await this.load();
         } catch {
-            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Yenileme ba�ar�s�z' });
+            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Yenileme başarısız' });
         }
     }
 
@@ -130,10 +130,10 @@ export class SslPage implements OnInit {
         this.renewingAll.set(true);
         try {
             await this.service.renewAll();
-            this.msg.add({ severity: 'success', summary: 'Ba�ar�l�', detail: 'T�m sertifikalar yenilendi' });
+            this.msg.add({ severity: 'success', summary: 'Başarılı', detail: 'Tüm sertifikalar yenilendi' });
             await this.load();
         } catch {
-            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Toplu yenileme ba�ar�s�z' });
+            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Toplu yenileme başarısız' });
         } finally {
             this.renewingAll.set(false);
         }
@@ -141,8 +141,8 @@ export class SslPage implements OnInit {
 
     deleteCert(cert: Certificate) {
         this.confirm.confirm({
-            message: `"${cert.domain}" sertifikas�n� silmek istedi�inize emin misiniz?`,
-            header: 'Silme Onay�',
+            message: `"${cert.domain}" sertifikasını silmek istediğinize emin misiniz?`,
+            header: 'Silme Onayı',
             icon: 'pi pi-exclamation-triangle',
             accept: async () => {
                 try {
@@ -150,7 +150,7 @@ export class SslPage implements OnInit {
                     this.msg.add({ severity: 'success', summary: 'Silindi' });
                     await this.load();
                 } catch {
-                    this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Silme ba�ar�s�z' });
+                    this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Silme başarısız' });
                 }
             }
         });

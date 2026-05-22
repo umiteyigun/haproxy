@@ -56,7 +56,7 @@ export class GuardPage implements OnInit {
             this.guardOnline.set(true);
         } catch {
             this.guardOnline.set(false);
-            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Banlar y�klenemedi' });
+            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Banlar yüklenemedi' });
         } finally {
             this.loadingBans.set(false);
         }
@@ -68,7 +68,7 @@ export class GuardPage implements OnInit {
             const data = await this.service.getWhitelist();
             this.whitelist.set(data);
         } catch {
-            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Whitelist y�klenemedi' });
+            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Whitelist yüklenemedi' });
         } finally {
             this.loadingWhitelist.set(false);
         }
@@ -79,11 +79,11 @@ export class GuardPage implements OnInit {
         this.banLoading.set(true);
         try {
             await this.service.manualBan(this.manualBanIp);
-            this.msg.add({ severity: 'success', summary: 'Banl�', detail: `${this.manualBanIp} banland�` });
+            this.msg.add({ severity: 'success', summary: 'Banlı', detail: `${this.manualBanIp} banlandı` });
             this.manualBanIp = '';
             await this.loadBans();
         } catch {
-            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Ban i�lemi ba�ar�s�z' });
+            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Ban işlemi başarısız' });
         } finally {
             this.banLoading.set(false);
         }
@@ -91,15 +91,15 @@ export class GuardPage implements OnInit {
 
     unban(ban: Ban) {
         this.confirm.confirm({
-            message: `${ban.ip} adresinin ban�n� kald�rmak istedi�inize emin misiniz?`,
-            header: 'Unban Onay�',
+            message: `${ban.ip} adresinin banını kaldırmak istediğinize emin misiniz?`,
+            header: 'Unban Onayı',
             accept: async () => {
                 try {
                     await this.service.unban(ban.ip);
                     this.msg.add({ severity: 'success', summary: 'Unban', detail: `${ban.ip} unban edildi` });
                     await this.loadBans();
                 } catch {
-                    this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Unban ba�ar�s�z' });
+                    this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Unban başarısız' });
                 }
             }
         });
@@ -114,7 +114,7 @@ export class GuardPage implements OnInit {
             this.newWhitelistIp = '';
             await this.loadWhitelist();
         } catch {
-            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Ekleme ba�ar�s�z' });
+            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Ekleme başarısız' });
         } finally {
             this.whitelistLoading.set(false);
         }
@@ -124,10 +124,10 @@ export class GuardPage implements OnInit {
         const ip = item.ip || item;
         try {
             await this.service.removeFromWhitelist(ip);
-            this.msg.add({ severity: 'success', summary: 'Kald�r�ld�' });
+            this.msg.add({ severity: 'success', summary: 'Kaldırıldı' });
             await this.loadWhitelist();
         } catch {
-            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Kald�rma ba�ar�s�z' });
+            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Kaldırma başarısız' });
         }
     }
 }

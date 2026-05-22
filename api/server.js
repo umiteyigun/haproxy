@@ -152,9 +152,15 @@ async function initDatabase() {
         backend_port INTEGER NOT NULL,
         protocol VARCHAR(10) DEFAULT 'tcp',
         active BOOLEAN DEFAULT true,
+        allow_ips TEXT DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
+    `);
+
+    // Migration: add allow_ips column if it does not exist yet
+    await pool.query(`
+      ALTER TABLE port_forwarding ADD COLUMN IF NOT EXISTS allow_ips TEXT DEFAULT NULL
     `);
 
     await pool.query(`
@@ -554,6 +560,16 @@ async function generateDynamicHAProxyConfig(rules, tcpRules = []) {
         tcpListeners += `listen tcp_${rule.id}_port_${rule.frontend_port}\n`;
         tcpListeners += `    bind *:${rule.frontend_port}\n`;
         tcpListeners += `    mode ${rule.protocol || 'tcp'}\n`;
+
+        // Per-rule IP allow list
+        if (rule.allow_ips) {
+          const ips = rule.allow_ips.split(',').map(ip => ip.trim()).filter(ip => ip);
+          if (ips.length > 0) {
+            tcpListeners += `    acl allowed_ips_${rule.id} src ${ips.join(' ')}\n`;
+            tcpListeners += `    tcp-request connection reject if !allowed_ips_${rule.id}\n`;
+          }
+        }
+
         tcpListeners += `    server ${serverName} ${rule.backend_host}:${rule.backend_port} check\n`;
         tcpListeners += `\n`;
 
@@ -1305,6 +1321,55 @@ app.delete('/api/port-forwarding/:id', requireAuth, async (req, res) => {
 
     await generateHAProxyConfig();
     res.json({ message: 'Port forwarding rule deleted' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get port forwarding rule security settings
+app.get('/api/port-forwarding/:id/security', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT id, name, frontend_port, allow_ips FROM port_forwarding WHERE id = $1', [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Rule not found' });
+    const row = result.rows[0];
+    const allow_ips = row.allow_ips
+      ? row.allow_ips.split(',').map(ip => ip.trim()).filter(ip => ip)
+      : [];
+    res.json({ id: row.id, name: row.name, frontend_port: row.frontend_port, allow_ips });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update port forwarding rule security settings
+app.put('/api/port-forwarding/:id/security', requireAuth, async (req, res) => {
+  try {
+    const { allow_ips } = req.body;
+    if (!Array.isArray(allow_ips)) return res.status(400).json({ error: 'allow_ips must be an array' });
+
+    // Basic validation: each entry should be a valid IP or CIDR notation
+    const ipCidrRegex = /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/;
+    for (const ip of allow_ips) {
+      if (!ipCidrRegex.test(ip.trim())) {
+        return res.status(400).json({ error: `Gecersiz IP/CIDR: ${ip}` });
+      }
+    }
+
+    const allowIpsStr = allow_ips.length > 0 ? allow_ips.map(ip => ip.trim()).join(',') : null;
+    const result = await pool.query(
+      'UPDATE port_forwarding SET allow_ips = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
+      [allowIpsStr, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Rule not found' });
+
+    await generateHAProxyConfig();
+    const row = result.rows[0];
+    res.json({
+      id: row.id,
+      name: row.name,
+      frontend_port: row.frontend_port,
+      allow_ips: row.allow_ips ? row.allow_ips.split(',').map(ip => ip.trim()).filter(ip => ip) : []
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

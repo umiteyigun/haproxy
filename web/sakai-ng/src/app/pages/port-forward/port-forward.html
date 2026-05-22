@@ -67,6 +67,7 @@
                         </td>
                         <td>
                             <p-button icon="pi pi-pencil" [text]="true" [rounded]="true" (onClick)="editRule(rule)" pTooltip="Duzenle" />
+                            <p-button icon="pi pi-shield" [text]="true" [rounded]="true" severity="warn" (onClick)="openSecurity(rule)" pTooltip="Kural Bazli Guvenlik" />
                             <p-button icon="pi pi-trash" [text]="true" [rounded]="true" severity="danger" (onClick)="deleteRule(rule)" pTooltip="Sil" />
                         </td>
                     </tr>
@@ -231,5 +232,74 @@
     <ng-template #footer>
         <p-button label="Iptal" [text]="true" (onClick)="dialogVisible = false" />
         <p-button label="Kaydet" [loading]="saving()" (onClick)="save()" />
+    </ng-template>
+</p-dialog>
+
+<!-- Kural Bazli Guvenlik Dialog -->
+<p-dialog [(visible)]="securityDialogVisible" [modal]="true" [style]="{width: '560px'}" [draggable]="false">
+    <ng-template #header>
+        <div class="flex items-center gap-2">
+            <i class="pi pi-shield text-yellow-500 text-xl"></i>
+            <span class="font-semibold text-lg">Kural Bazli Guvenlik</span>
+            @if (securityRule()) {
+                <p-tag [value]="securityRule()!.name + ' · Port ' + securityRule()!.frontend_port" severity="warn" />
+            }
+        </div>
+    </ng-template>
+
+    @if (loadingSecurity()) {
+        <div class="flex justify-center p-6">
+            <p-progressSpinner strokeWidth="4" animationDuration=".8s" styleClass="w-3rem h-3rem" />
+        </div>
+    } @else {
+        <div class="flex flex-col gap-4">
+
+            <div class="p-3 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-800">
+                <i class="pi pi-info-circle mr-2"></i>
+                <strong>IP Erisim Kontrolu:</strong> Asagidaki listede IP veya CIDR girilirse yalnizca bu adresler bu porta erisebilir.
+                Liste bos birakildigi surece tum IP'lere izin verilir.
+            </div>
+
+            <!-- Add IP row -->
+            <div class="flex gap-2">
+                <input pInputText [(ngModel)]="newSecurityIp"
+                    placeholder="IP veya CIDR (ornek: 1.2.3.4 veya 10.0.0.0/24)"
+                    class="flex-1" (keyup.enter)="addSecurityIp()" />
+                <p-button icon="pi pi-plus" label="Ekle" (onClick)="addSecurityIp()"
+                    [disabled]="!newSecurityIp.trim()" />
+            </div>
+
+            <!-- IP list -->
+            @if (securityIps().length === 0) {
+                <div class="text-center p-4 text-color-secondary border border-dashed rounded">
+                    <i class="pi pi-unlock text-2xl mb-2 block text-green-500"></i>
+                    Tum IP adreslerine erisim acik. Kisitlamak icin IP ekleyin.
+                </div>
+            } @else {
+                <p-table [value]="securityIps()" styleClass="p-datatable-sm p-datatable-striped">
+                    <ng-template #header>
+                        <tr>
+                            <th>Izin Verilen IP / CIDR</th>
+                            <th style="width: 60px">Sil</th>
+                        </tr>
+                    </ng-template>
+                    <ng-template #body let-ip>
+                        <tr>
+                            <td><code class="text-sm">{{ ip }}</code></td>
+                            <td>
+                                <p-button icon="pi pi-trash" [text]="true" [rounded]="true" severity="danger"
+                                    (onClick)="removeSecurityIp(ip)" pTooltip="Kaldir" />
+                            </td>
+                        </tr>
+                    </ng-template>
+                </p-table>
+            }
+
+        </div>
+    }
+
+    <ng-template #footer>
+        <p-button label="Iptal" [text]="true" (onClick)="securityDialogVisible = false" />
+        <p-button label="Kaydet" icon="pi pi-save" [loading]="savingSecurity()" (onClick)="saveSecurity()" />
     </ng-template>
 </p-dialog>

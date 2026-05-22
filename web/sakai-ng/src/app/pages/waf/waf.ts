@@ -1,4 +1,4 @@
-﻿import { Component, OnInit, signal, inject } from '@angular/core';
+import { Component, OnInit, signal, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
@@ -74,7 +74,7 @@ export class WafPage implements OnInit {
             const data = await this.service.getRules();
             this.rules.set(data);
         } catch {
-            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Kurallar y�klenemedi' });
+            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Kurallar yüklenemedi' });
         } finally {
             this.loadingRules.set(false);
         }
@@ -86,7 +86,7 @@ export class WafPage implements OnInit {
             const data = await this.service.getCrsRules();
             this.crsRules.set(data);
         } catch {
-            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'CRS kurallar� y�klenemedi' });
+            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'CRS kuralları yüklenemedi' });
         } finally {
             this.loadingCrs.set(false);
         }
@@ -108,22 +108,22 @@ export class WafPage implements OnInit {
 
     async save() {
         if (!this.form.filename || !this.form.content) {
-            this.msg.add({ severity: 'warn', summary: 'Uyar�', detail: 'Dosya ad� ve i�erik zorunludur' });
+            this.msg.add({ severity: 'warn', summary: 'Uyarı', detail: 'Dosya adı ve içerik zorunludur' });
             return;
         }
         this.saving.set(true);
         try {
             if (this.editMode() && this.editFilename !== null) {
                 await this.service.updateRule(this.editFilename, this.form.content);
-                this.msg.add({ severity: 'success', summary: 'G�ncellendi' });
+                this.msg.add({ severity: 'success', summary: 'Güncellendi' });
             } else {
                 await this.service.createRule(this.form.filename, this.form.content);
-                this.msg.add({ severity: 'success', summary: 'Olu�turuldu' });
+                this.msg.add({ severity: 'success', summary: 'Oluşturuldu' });
             }
             this.dialogVisible = false;
             await this.loadRules();
         } catch {
-            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Kay�t ba�ar�s�z' });
+            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Kayıt başarısız' });
         } finally {
             this.saving.set(false);
         }
@@ -131,8 +131,8 @@ export class WafPage implements OnInit {
 
     deleteRule(rule: WafRule) {
         this.confirm.confirm({
-            message: `"${rule.filename}" kural�n� silmek istedi�inize emin misiniz?`,
-            header: 'Silme Onay�',
+            message: `"${rule.filename}" kuralını silmek istediğinize emin misiniz?`,
+            header: 'Silme Onayı',
             icon: 'pi pi-exclamation-triangle',
             accept: async () => {
                 try {
@@ -140,7 +140,7 @@ export class WafPage implements OnInit {
                     this.msg.add({ severity: 'success', summary: 'Silindi' });
                     await this.loadRules();
                 } catch {
-                    this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Silme ba�ar�s�z' });
+                    this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Silme başarısız' });
                 }
             }
         });

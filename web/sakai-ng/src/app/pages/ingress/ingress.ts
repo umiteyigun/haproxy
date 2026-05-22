@@ -1,4 +1,4 @@
-﻿import { Component, OnInit, signal, inject } from '@angular/core';
+import { Component, OnInit, signal, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
@@ -49,7 +49,7 @@ export class IngressPage implements OnInit {
     form = this.emptyForm();
 
     lbModes = [
-        { label: 'Y�k Dengeleme (Round Robin)', value: 'roundrobin' },
+        { label: 'Yük Dengeleme (Round Robin)', value: 'roundrobin' },
         { label: 'Failover (Ana + Yedek)', value: 'failover' }
     ];
 
@@ -98,7 +98,7 @@ export class IngressPage implements OnInit {
             const data = await this.service.getRules();
             this.rules.set(data);
         } catch {
-            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Kurallar y�klenemedi' });
+            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Kurallar yüklenemedi' });
         } finally {
             this.loading.set(false);
         }
@@ -108,7 +108,7 @@ export class IngressPage implements OnInit {
         try {
             const certs = await this.sslService.getCertificates();
             this.certificates.set(certs ?? []);
-        } catch { /* sertifikalar y�klenemezse sessizce devam et */ }
+        } catch { /* sertifikalar yüklenemezse sessizce devam et */ }
     }
 
     async openNew() {
@@ -158,7 +158,7 @@ export class IngressPage implements OnInit {
 
     async save() {
         if (!this.form.domain || !this.form.backend_host) {
-            this.msg.add({ severity: 'warn', summary: 'Uyar�', detail: 'Domain ve backend host zorunludur' });
+            this.msg.add({ severity: 'warn', summary: 'Uyarı', detail: 'Domain ve backend host zorunludur' });
             return;
         }
         this.saving.set(true);
@@ -182,15 +182,15 @@ export class IngressPage implements OnInit {
         try {
             if (this.editMode() && this.editId !== null) {
                 await this.service.updateRule(this.editId, payload);
-                this.msg.add({ severity: 'success', summary: 'Ba�ar�l�', detail: 'Kural g�ncellendi' });
+                this.msg.add({ severity: 'success', summary: 'Başarılı', detail: 'Kural güncellendi' });
             } else {
                 await this.service.createRule(payload);
-                this.msg.add({ severity: 'success', summary: 'Ba�ar�l�', detail: 'Kural olu�turuldu' });
+                this.msg.add({ severity: 'success', summary: 'Başarılı', detail: 'Kural oluşturuldu' });
             }
             this.dialogVisible = false;
             await this.load();
         } catch {
-            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Kay�t ba�ar�s�z' });
+            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Kayıt başarısız' });
         } finally {
             this.saving.set(false);
         }
@@ -198,8 +198,8 @@ export class IngressPage implements OnInit {
 
     deleteRule(rule: Rule) {
         this.confirm.confirm({
-            message: `"${rule.domain}" kural�n� silmek istedi�inize emin misiniz?`,
-            header: 'Silme Onay�',
+            message: `"${rule.domain}" kuralını silmek istediğinize emin misiniz?`,
+            header: 'Silme Onayı',
             icon: 'pi pi-exclamation-triangle',
             accept: async () => {
                 try {
@@ -207,7 +207,7 @@ export class IngressPage implements OnInit {
                     this.msg.add({ severity: 'success', summary: 'Silindi', detail: 'Kural silindi' });
                     await this.load();
                 } catch {
-                    this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Silme ba�ar�s�z' });
+                    this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Silme başarısız' });
                 }
             }
         });

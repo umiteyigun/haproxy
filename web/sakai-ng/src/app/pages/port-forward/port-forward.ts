@@ -18,7 +18,7 @@ import { TooltipModule } from 'primeng/tooltip';
 import { MessageService, ConfirmationService } from 'primeng/api';
 import { PortForwardService } from '@/app/core/services/port-forward.service';
 import { WafService } from '@/app/core/services/waf.service';
-import { PortForwarding } from '@/app/core/models';
+import { PortForwarding, PortForwardSecurity } from '@/app/core/models';
 
 @Component({
     selector: 'app-port-forward',
@@ -61,6 +61,14 @@ export class PortForwardPage implements OnInit {
     filterUserAgents = '';
 
     form = this.emptyForm();
+
+    // Per-rule security
+    securityDialogVisible = false;
+    securityRule = signal<PortForwardSecurity | null>(null);
+    securityIps = signal<string[]>([]);
+    loadingSecurity = signal(false);
+    savingSecurity = signal(false);
+    newSecurityIp = '';
 
     emptyForm() {
         return { name: '', frontend_port: 0, backend_host: '', backend_port: 0, protocol: 'tcp' as 'tcp' | 'udp' };
@@ -239,5 +247,54 @@ export class PortForwardPage implements OnInit {
                 }
             }
         });
+    }
+
+    async openSecurity(rule: PortForwarding) {
+        this.securityDialogVisible = true;
+        this.securityRule.set(null);
+        this.securityIps.set([]);
+        this.newSecurityIp = '';
+        this.loadingSecurity.set(true);
+        try {
+            const sec = await this.service.getSecuritySettings(rule.id);
+            this.securityRule.set(sec);
+            this.securityIps.set([...sec.allow_ips]);
+        } catch {
+            this.msg.add({ severity: 'error', summary: 'Hata', detail: 'Guvenlik ayarlari yuklenemedi' });
+            this.securityDialogVisible = false;
+        } finally {
+            this.loadingSecurity.set(false);
+        }
+    }
+
+    addSecurityIp() {
+        const ip = this.newSecurityIp.trim();
+        if (!ip) return;
+        if (this.securityIps().includes(ip)) {
+            this.msg.add({ severity: 'warn', summary: 'Uyari', detail: 'Bu IP zaten listede mevcut' });
+            return;
+        }
+        this.securityIps.update(list => [...list, ip]);
+        this.newSecurityIp = '';
+    }
+
+    removeSecurityIp(ip: string) {
+        this.securityIps.update(list => list.filter(e => e !== ip));
+    }
+
+    async saveSecurity() {
+        const sec = this.securityRule();
+        if (!sec) return;
+        this.savingSecurity.set(true);
+        try {
+            await this.service.updateSecuritySettings(sec.id, this.securityIps());
+            this.msg.add({ severity: 'success', summary: 'Kaydedildi', detail: 'Guvenlik ayarlari guncellendi' });
+            this.securityDialogVisible = false;
+            await this.load();
+        } catch (err: any) {
+            this.msg.add({ severity: 'error', summary: 'Hata', detail: err?.error?.error || 'Kayit basarisiz' });
+        } finally {
+            this.savingSecurity.set(false);
+        }
     }
 }

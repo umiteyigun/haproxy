@@ -101,7 +101,7 @@ RUN mkdir -p /etc/modsecurity/owasp-modsecurity-crs \
     && mkdir -p /etc/modsecurity/custom-rules /var/log/modsecurity
 
 COPY spoa/start.sh /start.sh
-RUN chmod +x /start.sh
+RUN sed -i 's/\r//' /start.sh && chmod +x /start.sh
 
 COPY modsecurity/rules/ /etc/modsecurity/custom-rules/
 RUN if ! grep -q "/etc/modsecurity/custom-rules/*.conf" /etc/modsecurity/owasp-modsecurity-crs.conf; then \

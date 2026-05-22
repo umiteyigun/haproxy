@@ -59,8 +59,16 @@ export interface PortForwarding {
   backend_port: number;
   protocol: 'tcp' | 'udp';
   active?: boolean;
+  allow_ips?: string | null;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface PortForwardSecurity {
+  id: number;
+  name: string;
+  frontend_port: number;
+  allow_ips: string[];
 }
 
 // ─── SSL / Certificates ──────────────────────────────────────────────────────

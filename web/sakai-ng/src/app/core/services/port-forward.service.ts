@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
-import { PortForwarding } from '../models';
+import { PortForwarding, PortForwardSecurity } from '../models';
 
 @Injectable({ providedIn: 'root' })
 export class PortForwardService {
@@ -25,5 +25,13 @@ export class PortForwardService {
 
     async deleteRule(id: number): Promise<void> {
         return firstValueFrom(this.http.delete<void>(`/api/port-forwarding/${id}`));
+    }
+
+    async getSecuritySettings(id: number): Promise<PortForwardSecurity> {
+        return firstValueFrom(this.http.get<PortForwardSecurity>(`/api/port-forwarding/${id}/security`));
+    }
+
+    async updateSecuritySettings(id: number, allow_ips: string[]): Promise<PortForwardSecurity> {
+        return firstValueFrom(this.http.put<PortForwardSecurity>(`/api/port-forwarding/${id}/security`, { allow_ips }));
     }
 }
